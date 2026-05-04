@@ -3,6 +3,8 @@ const cors = require('cors')
 const connectDB = require('./config/db')
 require('dotenv').config()
 
+const protectedRoutes = require('./routes/protectedRoutes')
+
 const app = express()
 
 app.use(cors())
@@ -10,12 +12,12 @@ app.use(express.json())
 
 connectDB()
 
-const authRoutes = require('./routes/auth.routes')
-app.use('/api/auth', authRoutes)
-
 app.get('/', (req, res) => {
-  res.send('NoteLearn API Running 🚀')
+  res.send('NoteLearn API Running ??')
 })
+
+// Protected route
+app.use('/api/protected', protectedRoutes)
 
 const PORT = process.env.PORT || 5000
 app.listen(PORT, () => {
