@@ -4,8 +4,11 @@ import Login from './pages/auth/Login'
 import Register from './pages/auth/Register'
 import Dashboard from './pages/dashboard/Dashboard'
 import Groups from './pages/group/Groups'
-import Landing from './pages/Landing'
 import GroupDetail from './pages/group/GroupDetail'
+import Documents from './pages/documents/Documents'
+import SessionRoom from './pages/session/SessionRoom'
+import Landing from './pages/Landing'
+
 
 const ProtectedRoute = ({ children }) => {
   const { user } = useAuth()
@@ -22,6 +25,8 @@ function AppRoutes() {
       <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
       <Route path="/groups" element={<ProtectedRoute><Groups /></ProtectedRoute>} />
       <Route path="/groups/:id" element={<ProtectedRoute><GroupDetail /></ProtectedRoute>} />  
+      <Route path="/documents" element={<ProtectedRoute><Documents /></      ProtectedRoute>} />
+      <Route path="/session/:id" element={<ProtectedRoute><SessionRoom /></ProtectedRoute>} />
       <Route path="/" element={<Navigate to="/dashboard" />} />
     </Routes>
   )
