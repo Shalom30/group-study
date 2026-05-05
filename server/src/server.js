@@ -23,10 +23,6 @@ app.get('/', (req, res) => {
   res.send('NoteLearn API Running')
 })
 
-// Test route
-app.post('/api/test', (req, res) => {
-  res.json({ message: 'Test route works', body: req.body })
-})
 
 console.log('Mounting auth routes...')
 app.use('/api/auth', authRoutes)
@@ -44,11 +40,14 @@ const PORT = process.env.PORT || 5000
 app.listen(PORT, () => {
   console.log('Server running on port', PORT)
   console.log('Registered routes:')
-  const routerStack = app._router?.stack || []
-  routerStack
-    .filter((layer) => layer.route)
-    .forEach((layer) => {
-      const methods = Object.keys(layer.route.methods).join(', ').toUpperCase()
-      console.log(`${methods} ${layer.route.path}`)
-    })
+  // List all routes after server starts
+  setTimeout(() => {
+    const routerStack = app._router?.stack || []
+    routerStack
+      .filter((layer) => layer.route)
+      .forEach((layer) => {
+        const methods = Object.keys(layer.route.methods).join(', ').toUpperCase()
+        console.log(`${methods} ${layer.route.path}`)
+      })
+  }, 100)
 })

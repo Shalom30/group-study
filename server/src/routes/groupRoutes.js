@@ -18,30 +18,23 @@ router.post('/create', authMiddleware, async (req, res) => {
 router.post('/invite', authMiddleware, async (req, res) => {
   try {
     const { email, groupId } = req.body
-    console.log('Inviting user:', email, 'to group:', groupId)
     const group = await Group.findById(groupId)
     if (!group) return res.status(404).json({ message: 'Group not found' })
     const existingInvite = await Invitation.findOne({ email, group: groupId, status: 'pending' })
     if (existingInvite) return res.status(400).json({ message: 'User already invited' })
     const invite = new Invitation({ email, group: groupId, invitedBy: req.user.id })
     await invite.save()
-    console.log('Invitation created:', invite._id, 'for email:', invite.email)
     res.json({ message: 'Invitation sent', invite })
   } catch (err) {
-    console.error('Error inviting user:', err)
     res.status(500).json({ message: err.message })
   }
 })
 
 router.get('/invitations', authMiddleware, async (req, res) => {
   try {
-    console.log('Fetching invitations for user:', req.user.email)
-    console.log('User ID:', req.user.id)
     const invites = await Invitation.find({ email: req.user.email, status: 'pending' }).populate('group')
-    console.log('Found invitations:', invites.length)
     res.json(invites)
   } catch (err) {
-    console.error('Error fetching invitations:', err)
     res.status(500).json({ message: err.message })
   }
 })
@@ -64,6 +57,22 @@ router.get('/my-groups', authMiddleware, async (req, res) => {
     const groups = await Group.find({ members: req.user.id })
     res.json(groups)
   } catch (err) {
+    res.status(500).json({ message: err.message })
+  }
+})
+
+router.get('/:id', authMiddleware, async (req, res) => {
+  try {
+    console.log('Getting group by ID:', req.params.id)
+    const group = await Group.findById(req.params.id).populate('members', 'name email')
+    if (!group) {
+      console.log('Group not found:', req.params.id)
+      return res.status(404).json({ message: 'Group not found' })
+    }
+    console.log('Group found:', group.name)
+    res.json(group)
+  } catch (err) {
+    console.error('Error getting group:', err)
     res.status(500).json({ message: err.message })
   }
 })
