@@ -92,12 +92,20 @@ router.get('/:sessionId', authMiddleware, async (req, res) => {
       .populate('subGroups.members', 'name email')
       .populate('subGroups.leaderId', 'name email')
     if (!session) return res.status(404).json({ message: 'Session not found' })
-    res.json(session)
+
+    // Calculate server-side time remaining
+    const phaseDuration = [10, 20, 10, 15, 0][session.currentPhase] * 60
+    let timeRemaining = null
+    if (session.phaseStartedAt && phaseDuration > 0) {
+      const elapsed = Math.floor((Date.now() - new Date(session.phaseStartedAt).getTime()) / 1000)
+      timeRemaining = Math.max(0, phaseDuration - elapsed)
+    }
+
+    res.json({ ...session.toObject(), timeRemaining })
   } catch (err) {
     res.status(500).json({ message: err.message })
   }
 })
-
 // GET ACTIVE SESSION FOR A GROUP
 router.get('/group/:groupId/active', authMiddleware, async (req, res) => {
   try {
@@ -143,4 +151,24 @@ router.post('/:sessionId/subgroup/:subGroupIndex/done', authMiddleware, async (r
   }
 })
 
+// ADVANCE PHASE
+router.post('/:sessionId/phase', authMiddleware, async (req, res) => {
+  try {
+    const session = await Session.findById(req.params.sessionId)
+    if (!session) return res.status(404).json({ message: 'Session not found' })
+    if (session.createdBy.toString() !== req.user.id) {
+      return res.status(403).json({ message: 'Only the session creator can advance the phase' })
+    }
+    session.currentPhase = req.body.phase
+    session.status = 'active'
+    session.phaseStartedAt = new Date()
+    await session.save()
+    const populated = await Session.findById(session._id)
+      .populate('subGroups.members', 'name email')
+      .populate('subGroups.leaderId', 'name email')
+    res.json(populated)
+  } catch (err) {
+    res.status(500).json({ message: err.message })
+  }
+})
 module.exports = router

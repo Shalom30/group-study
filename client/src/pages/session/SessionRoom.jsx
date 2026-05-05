@@ -4,44 +4,100 @@ import { useAuth } from '../../context/AuthContext'
 import api from '../../services/api'
 import { io } from 'socket.io-client'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
-  ArrowLeft, Send, Hand, Mic, MicOff,
-  Brain, Users, BookOpen, CheckCircle,
-  MessageSquare, Target
+  ArrowLeft, Brain, Users, BookOpen,
+  CheckCircle, Target, Send, Hand,
+  Mic, MicOff, MessageSquare, Clock,
+  Trophy, AlertCircle, Loader2
 } from 'lucide-react'
-
-const SESSION_PHASES = [
-  { id: 'intro', label: 'Introduction', icon: BookOpen, color: 'text-blue-500' },
-  { id: 'explain', label: 'Peer Explanation', icon: Users, color: 'text-green-500' },
-  { id: 'ai', label: 'AI Clarification', icon: Brain, color: 'text-purple-500' },
-  { id: 'quiz', label: 'Practice', icon: Target, color: 'text-orange-500' },
-  { id: 'summary', label: 'Summary', icon: CheckCircle, color: 'text-teal-500' },
-]
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 
 const SOCKET_URL = 'http://localhost:5000'
+
+const PHASE_INFO = [
+  {
+    id: 'briefing',
+    label: 'Briefing',
+    icon: BookOpen,
+    color: 'text-blue-500',
+    bg: 'bg-blue-50',
+    border: 'border-blue-200',
+    duration: 10,
+    description: 'Introduction and topic overview'
+  },
+  {
+    id: 'peer_teaching',
+    label: 'Peer Teaching',
+    icon: Users,
+    color: 'text-green-500',
+    bg: 'bg-green-50',
+    border: 'border-green-200',
+    duration: 20,
+    description: 'Subgroups teach each other'
+  },
+  {
+    id: 'debrief',
+    label: 'AI Debrief',
+    icon: Brain,
+    color: 'text-purple-500',
+    bg: 'bg-purple-50',
+    border: 'border-purple-200',
+    duration: 10,
+    description: 'Share and clarify with everyone'
+  },
+  {
+    id: 'practice',
+    label: 'Practice',
+    icon: Target,
+    color: 'text-orange-500',
+    bg: 'bg-orange-50',
+    border: 'border-orange-200',
+    duration: 15,
+    description: 'Answer flashcard questions'
+  },
+  {
+    id: 'summary',
+    label: 'Summary',
+    icon: CheckCircle,
+    color: 'text-teal-500',
+    bg: 'bg-teal-50',
+    border: 'border-teal-200',
+    duration: 0,
+    description: 'Review results and wrap up'
+  }
+]
 
 export default function SessionRoom() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { user } = useAuth()
-  const [group, setGroup] = useState(null)
+  const [session, setSession] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [currentUserId, setCurrentUserId] = useState(null)
+  const [userName, setUserName] = useState('')
+  const [isAdmin, setIsAdmin] = useState(false)
+  const [mySubGroup, setMySubGroup] = useState(null)
+  const [mySubGroupIndex, setMySubGroupIndex] = useState(null)
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
-  const [currentPhase, setCurrentPhase] = useState(0)
+  const [onlineMembers, setOnlineMembers] = useState([])
   const [handRaised, setHandRaised] = useState(false)
   const [isSpeaking, setIsSpeaking] = useState(false)
-  const [topic, setTopic] = useState('')
-  const [sessionStarted, setSessionStarted] = useState(false)
-  const [aiThinking, setAiThinking] = useState(false)
-  const [onlineMembers, setOnlineMembers] = useState([])
-  const [userName, setUserName] = useState('')
+  const [timeLeft, setTimeLeft] = useState(null)
+  const [answers, setAnswers] = useState({})
+  const [submitted, setSubmitted] = useState(false)
+  const [score, setScore] = useState(null)
+  const [subgroupDone, setSubgroupDone] = useState(false)
   const messagesEndRef = useRef(null)
   const socketRef = useRef(null)
+  const timerRef = useRef(null)
 
   useEffect(() => {
-    fetchGroup()
+    const token = localStorage.getItem('token')
+    if (token) {
+      const payload = JSON.parse(atob(token.split('.')[1]))
+      setCurrentUserId(payload.id)
+    }
+    fetchSession()
   }, [id])
 
   useEffect(() => {
@@ -49,8 +105,7 @@ export default function SessionRoom() {
   }, [messages])
 
   useEffect(() => {
-    if (!userName) return
-
+    if (!userName || !session) return
     const socket = io(SOCKET_URL)
     socketRef.current = socket
 
@@ -58,9 +113,7 @@ export default function SessionRoom() {
 
     socket.on('user-joined', ({ userName: who, members }) => {
       setOnlineMembers(members)
-      if (who !== userName) {
-        addSystemMessage(`${who} joined the session`)
-      }
+      if (who !== userName) addSystemMessage(`${who} joined the session`)
     })
 
     socket.on('user-left', ({ userName: who, members }) => {
@@ -72,10 +125,10 @@ export default function SessionRoom() {
       setMessages(prev => [...prev, message])
     })
 
-    socket.on('phase-changed', (phase) => {
-      setCurrentPhase(phase)
-      const p = SESSION_PHASES[phase]
-      addSystemMessage(`Phase changed to: ${p.label}`)
+    socket.on('phase-changed', ({ phase, session: updatedSession }) => {
+      setSession(updatedSession)
+      startPhaseTimer(phase)
+      addSystemMessage(`Moving to Phase ${phase + 1}: ${PHASE_INFO[phase].label}`)
     })
 
     socket.on('hand-raised', ({ userName: who, raised }) => {
@@ -84,24 +137,74 @@ export default function SessionRoom() {
       }
     })
 
-    return () => {
-      socket.disconnect()
-    }
-  }, [userName, id])
+    socket.on('subgroup-done', ({ subGroupIndex }) => {
+      addSystemMessage(`Subgroup ${subGroupIndex + 1} has finished teaching!`)
+    })
 
-  const fetchGroup = async () => {
-    try {
-      const res = await api.get(`/groups/${id}`)
-      setGroup(res.data)
-      const token = localStorage.getItem('token')
-      if (token) {
-        const payload = JSON.parse(atob(token.split('.')[1]))
-        const member = res.data.members.find(m => m._id === payload.id)
-        setUserName(member?.name || payload.email || 'Student')
-      }
-    } catch (err) {
-      console.error(err)
+    socket.on('session-ended', () => {
+      addSystemMessage('The session has been ended by the admin.')
+      setTimeout(() => navigate(`/groups/${session?.group?._id || ''}`), 3000)
+    })
+
+    return () => socket.disconnect()
+  }, [userName, session?._id])
+
+  useEffect(() => {
+    if (!session || !currentUserId) return
+
+    const creatorId = session.createdBy?._id || session.createdBy
+    setIsAdmin(creatorId?.toString() === currentUserId)
+
+    const sgIndex = session.subGroups?.findIndex(sg =>
+      sg.members?.some(m => (m._id || m).toString() === currentUserId)
+    )
+    if (sgIndex !== -1 && sgIndex !== undefined) {
+      setMySubGroup(session.subGroups[sgIndex])
+      setMySubGroupIndex(sgIndex)
     }
+
+    const allMembers = session.subGroups?.flatMap(sg => sg.members) || []
+    const me = allMembers.find(m => (m._id || m).toString() === currentUserId)
+    setUserName(me?.name || 'Student')
+
+    startPhaseTimer(session.currentPhase)
+  }, [session, currentUserId])
+
+    const fetchSession = async () => {
+    try {
+        const res = await api.get(`/sessions/${id}`)
+        setSession(res.data)
+        if (res.data.messages?.length > 0) {
+        setMessages(res.data.messages)
+        }
+        if (res.data.timeRemaining !== null && res.data.timeRemaining !== undefined) {
+        if (timerRef.current) clearInterval(timerRef.current)
+        let secs = res.data.timeRemaining
+        setTimeLeft(secs)
+        if (secs > 0) {
+            timerRef.current = setInterval(() => {
+            secs -= 1
+            setTimeLeft(secs)
+            if (secs <= 0) {
+                clearInterval(timerRef.current)
+                setTimeLeft(0)
+            }
+            }, 1000)
+        }
+        }
+    } catch (err) {
+        console.error(err)
+    } finally {
+        setLoading(false)
+    }
+    }
+
+
+  const formatTime = (secs) => {
+    if (secs === null) return ''
+    const m = Math.floor(secs / 60).toString().padStart(2, '0')
+    const s = (secs % 60).toString().padStart(2, '0')
+    return `${m}:${s}`
   }
 
   const addSystemMessage = (text) => {
@@ -113,75 +216,55 @@ export default function SessionRoom() {
     }])
   }
 
-  const startSession = () => {
-    if (!topic.trim()) return
-    setSessionStarted(true)
-
-    const sysMsg = {
-      id: Date.now(),
-      type: 'system',
-      text: `Study session started on: "${topic}"`,
-      time: new Date().toLocaleTimeString()
-    }
-    const introMsg = {
-      id: Date.now() + 1,
-      type: 'system',
-      text: `Phase 1: Introduction — Each member should briefly share what they already know about "${topic}".`,
-      time: new Date().toLocaleTimeString()
-    }
-    setMessages([sysMsg, introMsg])
-  }
-
-  const sendMessage = async () => {
+  const sendMessage = () => {
     if (!input.trim() || !socketRef.current) return
-    const text = input.trim()
-    setInput('')
-
     const message = {
       id: Date.now(),
       type: 'user',
-      text,
+      text: input.trim(),
       sender: userName,
       time: new Date().toLocaleTimeString()
     }
-
     socketRef.current.emit('send-message', { groupId: id, message })
+    setInput('')
+  }
 
-    if (text.toLowerCase().startsWith('/ai ')) {
-      setAiThinking(true)
-      setTimeout(() => {
-        const aiMsg = {
-          id: Date.now(),
-          type: 'ai',
-          text: `I'll help with that. You asked: "${text.replace('/ai ', '')}". Connect your AI service with an OpenAI key to get real answers from your uploaded documents.`,
-          time: new Date().toLocaleTimeString()
-        }
-        socketRef.current.emit('send-message', { groupId: id, message: aiMsg })
-        setAiThinking(false)
-      }, 1500)
+  const advancePhase = async () => {
+    if (!isAdmin) return
+    try {
+      const nextPhase = session.currentPhase + 1
+      const res = await api.post(`/sessions/${id}/phase`, { phase: nextPhase })
+      setSession(res.data)
+      socketRef.current?.emit('phase-change', {
+        groupId: id,
+        phase: nextPhase,
+        session: res.data
+      })
+      startPhaseTimer(nextPhase)
+    } catch (err) {
+      console.error(err)
     }
   }
 
-  const nextPhase = () => {
-    if (currentPhase < SESSION_PHASES.length - 1) {
-      const next = currentPhase + 1
-      socketRef.current.emit('phase-change', { groupId: id, phase: next })
-      setCurrentPhase(next)
+  const endSession = async () => {
+    if (!isAdmin) return
+    try {
+      await api.post(`/sessions/${id}/end`)
+      socketRef.current?.emit('session-ended', { groupId: id })
+      navigate(`/groups/${session?.group?._id || ''}`)
+    } catch (err) {
+      console.error(err)
+    }
+  }
 
-      const phase = SESSION_PHASES[next]
-      let phaseMsg = ''
-      if (phase.id === 'explain') phaseMsg = 'Peer Explanation — Take turns explaining key concepts. Use /ai [question] to ask the AI.'
-      else if (phase.id === 'ai') phaseMsg = 'AI Clarification — Type your questions and the AI will address gaps.'
-      else if (phase.id === 'quiz') phaseMsg = 'Practice Phase — Answer these questions to test your understanding.'
-      else if (phase.id === 'summary') phaseMsg = 'Summary — Great work! Review your flashcards after this session.'
-
-      const sysMsg = {
-        id: Date.now(),
-        type: 'system',
-        text: `Moving to Phase ${next + 1}: ${phase.label}. ${phaseMsg}`,
-        time: new Date().toLocaleTimeString()
-      }
-      socketRef.current.emit('send-message', { groupId: id, message: sysMsg })
+  const markSubgroupDone = async () => {
+    try {
+      const res = await api.post(`/sessions/${id}/subgroup/${mySubGroupIndex}/done`)
+      setSubgroupDone(true)
+      socketRef.current?.emit('subgroup-done', { groupId: id, subGroupIndex: mySubGroupIndex })
+      addSystemMessage(`Your subgroup marked as done. ${res.data.allDone ? 'All subgroups finished!' : 'Waiting for other subgroups...'}`)
+    } catch (err) {
+      console.error(err)
     }
   }
 
@@ -192,104 +275,183 @@ export default function SessionRoom() {
     addSystemMessage(newState ? 'You raised your hand ✋' : 'You lowered your hand')
   }
 
-  const toggleSpeak = () => {
-    setIsSpeaking(!isSpeaking)
-    addSystemMessage(!isSpeaking ? 'You are now the active speaker 🎙️' : 'You stopped speaking')
+  const submitAnswers = () => {
+    let correct = 0
+    session.flashcards?.forEach((card, i) => {
+      if (answers[i]?.trim().toLowerCase().length > 3) correct++
+    })
+    const percentage = Math.round((correct / session.flashcards.length) * 100)
+    setScore(percentage)
+    setSubmitted(true)
   }
 
-  if (!group) {
+  if (loading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
-        <p className="text-muted-foreground">Loading session...</p>
+        <div className="text-center">
+          <Loader2 className="w-8 h-8 animate-spin text-primary mx-auto mb-3" />
+          <p className="text-muted-foreground">Loading session...</p>
+        </div>
       </div>
     )
   }
 
+  if (!session) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center">
+          <AlertCircle className="w-8 h-8 text-destructive mx-auto mb-3" />
+          <p className="text-muted-foreground">Session not found</p>
+          <Button className="mt-4" onClick={() => navigate(-1)}>Go Back</Button>
+        </div>
+      </div>
+    )
+  }
+
+  const currentPhase = session.currentPhase || 0
+  const phase = PHASE_INFO[currentPhase]
+
   return (
     <div className="min-h-screen bg-background flex flex-col">
+      {/* Header */}
       <div className="border-b border-border bg-card px-6 py-3 flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <Button variant="ghost" size="sm" onClick={() => navigate(`/groups/${id}`)}>
+          <Button variant="ghost" size="sm" onClick={() => navigate(-1)}>
             <ArrowLeft className="w-4 h-4 mr-2" />
-            Leave Session
+            Leave
           </Button>
           <div>
-            <h1 className="font-semibold">{group.name}</h1>
+            <h1 className="font-semibold">{session.topic}</h1>
             <p className="text-xs text-muted-foreground">
-              {sessionStarted ? `Topic: ${topic}` : 'Set a topic to begin'}
+              Phase {currentPhase + 1}: {phase.label}
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
+          {timeLeft !== null && (
+            <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-mono font-medium ${
+              timeLeft < 60 ? 'bg-red-100 text-red-600' : 'bg-secondary text-foreground'
+            }`}>
+              <Clock className="w-3.5 h-3.5" />
+              {formatTime(timeLeft)}
+            </div>
+          )}
           <div className="flex items-center gap-1 bg-green-100 text-green-700 text-xs px-3 py-1 rounded-full">
             <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
             {onlineMembers.length || 1} online
           </div>
+          {isAdmin && (
+            <Button variant="destructive" size="sm" onClick={endSession}>
+              End Session
+            </Button>
+          )}
         </div>
       </div>
 
       <div className="flex flex-1 overflow-hidden">
-        <div className="w-72 border-r border-border bg-card flex flex-col">
+        {/* Left Sidebar */}
+        <div className="w-64 border-r border-border bg-card flex flex-col overflow-y-auto">
+          {/* Phase Flow */}
           <div className="p-4 border-b border-border">
-            <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
               Session Flow
-            </h3>
+            </p>
             <div className="space-y-1">
-              {SESSION_PHASES.map((phase, i) => {
-                const Icon = phase.icon
+              {PHASE_INFO.map((p, i) => {
+                const Icon = p.icon
                 const isActive = i === currentPhase
                 const isDone = i < currentPhase
                 return (
-                  <div key={phase.id} className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm ${
+                  <div key={p.id} className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm ${
                     isActive ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground'
                   }`}>
-                    <Icon className={`w-4 h-4 ${isActive ? 'text-primary' : isDone ? 'text-green-500' : ''}`} />
-                    <span>{phase.label}</span>
-                    {isDone && <CheckCircle className="w-3 h-3 text-green-500 ml-auto" />}
-                    {isActive && <div className="w-2 h-2 bg-primary rounded-full ml-auto animate-pulse" />}
+                    <Icon className={`w-4 h-4 flex-shrink-0 ${
+                      isActive ? 'text-primary' : isDone ? 'text-green-500' : ''
+                    }`} />
+                    <span className="truncate">{p.label}</span>
+                    {isDone && <CheckCircle className="w-3 h-3 text-green-500 ml-auto flex-shrink-0" />}
+                    {isActive && <div className="w-2 h-2 bg-primary rounded-full ml-auto flex-shrink-0 animate-pulse" />}
                   </div>
                 )
               })}
             </div>
           </div>
 
-          <div className="p-4 border-b border-border">
-            <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
-              Members
-            </h3>
-            <div className="space-y-2">
-              {group.members.map((member, i) => {
-                const isOnline = onlineMembers.includes(member.name)
-                return (
-                  <div key={i} className="flex items-center gap-2">
-                    <div className="w-7 h-7 bg-primary/10 rounded-full flex items-center justify-center">
-                      <span className="text-xs font-semibold text-primary">
-                        {member.name ? member.name.charAt(0).toUpperCase() : 'U'}
-                      </span>
+          {/* My Subgroup */}
+          {mySubGroup && (
+            <div className="p-4 border-b border-border">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
+                My Subgroup
+              </p>
+              <div className={`rounded-lg p-3 border ${phase.border} ${phase.bg}`}>
+                <p className="text-xs font-semibold mb-2">{mySubGroup.name}</p>
+                <div className="space-y-1 mb-3">
+                  {mySubGroup.members?.map((m, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <div className="w-5 h-5 bg-primary/10 rounded-full flex items-center justify-center">
+                        <span className="text-xs font-bold text-primary">
+                          {(m.name || 'U').charAt(0).toUpperCase()}
+                        </span>
+                      </div>
+                      <span className="text-xs">{m.name || 'Member'}</span>
                     </div>
-                    <span className="text-sm">{member.name || 'Member'}</span>
-                    <div className={`w-2 h-2 rounded-full ml-auto ${isOnline ? 'bg-green-500' : 'bg-gray-300'}`} />
-                  </div>
-                )
-              })}
+                  ))}
+                </div>
+                <p className="text-xs font-medium text-muted-foreground mb-1">Topics:</p>
+                {mySubGroup.topics?.map((t, i) => (
+                  <p key={i} className="text-xs text-foreground bg-white/60 rounded px-2 py-1 mb-1">
+                    {t}
+                  </p>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
 
+          {/* Controls */}
           <div className="p-4 mt-auto">
-            <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
               Controls
-            </h3>
+            </p>
             <div className="space-y-2">
-              <Button variant={isSpeaking ? 'default' : 'outline'} size="sm" className="w-full justify-start" onClick={toggleSpeak}>
-                {isSpeaking ? <Mic className="w-4 h-4 mr-2" /> : <MicOff className="w-4 h-4 mr-2" />}
-                {isSpeaking ? 'Speaking' : 'Take the Floor'}
+              <Button
+                variant={isSpeaking ? 'default' : 'outline'}
+                size="sm"
+                className="w-full justify-start"
+                onClick={() => {
+                  setIsSpeaking(!isSpeaking)
+                  addSystemMessage(!isSpeaking ? 'You took the floor 🎙️' : 'You gave up the floor')
+                }}
+              >
+                {isSpeaking
+                  ? <Mic className="w-4 h-4 mr-2" />
+                  : <MicOff className="w-4 h-4 mr-2" />}
+                {isSpeaking ? 'Speaking' : 'Take Floor'}
               </Button>
-              <Button variant={handRaised ? 'default' : 'outline'} size="sm" className="w-full justify-start" onClick={raiseHand}>
+              <Button
+                variant={handRaised ? 'default' : 'outline'}
+                size="sm"
+                className="w-full justify-start"
+                onClick={raiseHand}
+              >
                 <Hand className="w-4 h-4 mr-2" />
                 {handRaised ? 'Hand Raised ✋' : 'Raise Hand'}
               </Button>
-              {sessionStarted && currentPhase < SESSION_PHASES.length - 1 && (
-                <Button size="sm" className="w-full justify-start" onClick={nextPhase}>
+              {currentPhase === 1 && mySubGroup && !subgroupDone && (
+                <Button
+                  size="sm"
+                  className="w-full justify-start bg-green-600 hover:bg-green-700"
+                  onClick={markSubgroupDone}
+                >
+                  <CheckCircle className="w-4 h-4 mr-2" />
+                  Done Teaching
+                </Button>
+              )}
+              {isAdmin && currentPhase < PHASE_INFO.length - 1 && (
+                <Button
+                  size="sm"
+                  className="w-full justify-start"
+                  onClick={advancePhase}
+                >
                   <Target className="w-4 h-4 mr-2" />
                   Next Phase
                 </Button>
@@ -298,36 +460,128 @@ export default function SessionRoom() {
           </div>
         </div>
 
-        <div className="flex-1 flex flex-col">
-          {!sessionStarted ? (
-            <div className="flex-1 flex items-center justify-center p-8">
-              <Card className="w-full max-w-md">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Brain className="w-5 h-5 text-primary" />
-                    Start Study Session
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <p className="text-sm text-muted-foreground">
-                    Enter the topic you want to study today. The AI will facilitate
-                    your session through structured phases.
+        {/* Main Content Area */}
+        <div className="flex-1 flex flex-col overflow-hidden">
+          {/* Phase Banner */}
+          <div className={`px-6 py-3 border-b ${phase.border} ${phase.bg} flex items-center justify-between`}>
+            <div className="flex items-center gap-3">
+              {(() => { const Icon = phase.icon; return <Icon className={`w-5 h-5 ${phase.color}`} /> })()}
+              <div>
+                <p className={`font-semibold text-sm ${phase.color}`}>{phase.label}</p>
+                <p className="text-xs text-muted-foreground">{phase.description}</p>
+              </div>
+            </div>
+            {currentPhase === 0 && (
+              <div className="text-xs text-muted-foreground bg-white/60 px-3 py-1 rounded-full">
+                Introduce yourself and share what you know about: <strong>{session.topic}</strong>
+              </div>
+            )}
+            {currentPhase === 1 && mySubGroup && (
+              <div className="text-xs text-muted-foreground bg-white/60 px-3 py-1 rounded-full">
+                Teach your subgroup: {mySubGroup.topics?.join(', ')}
+              </div>
+            )}
+            {currentPhase === 2 && (
+              <div className="text-xs text-muted-foreground bg-white/60 px-3 py-1 rounded-full">
+                Share your subgroup's findings with everyone
+              </div>
+            )}
+            {currentPhase === 3 && !submitted && (
+              <div className="text-xs text-muted-foreground bg-white/60 px-3 py-1 rounded-full">
+                Answer all questions then click Submit
+              </div>
+            )}
+          </div>
+
+          {/* Phase 3 (Practice) — Flashcard Interface */}
+          {currentPhase === 3 ? (
+            <div className="flex-1 overflow-y-auto p-6">
+              {submitted ? (
+                <div className="max-w-2xl mx-auto text-center py-12">
+                  <div className={`w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-6 ${
+                    score >= 70 ? 'bg-green-100' : score >= 40 ? 'bg-yellow-100' : 'bg-red-100'
+                  }`}>
+                    <Trophy className={`w-12 h-12 ${
+                      score >= 70 ? 'text-green-600' : score >= 40 ? 'text-yellow-600' : 'text-red-600'
+                    }`} />
+                  </div>
+                  <h2 className="text-3xl font-bold mb-2">{score}%</h2>
+                  <p className="text-muted-foreground mb-2">
+                    {score >= 70 ? 'Excellent work! 🎉' : score >= 40 ? 'Good effort! Keep reviewing.' : 'Keep studying — you\'ll get there!'}
                   </p>
-                  <Input
-                    placeholder="e.g. Data Structures - Binary Trees"
-                    value={topic}
-                    onChange={(e) => setTopic(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && startSession()}
-                  />
-                  <Button className="w-full" onClick={startSession} disabled={!topic.trim()}>
-                    Begin Session
+                  <p className="text-sm text-muted-foreground">
+                    Waiting for everyone to finish before moving to Summary...
+                  </p>
+                </div>
+              ) : (
+                <div className="max-w-2xl mx-auto">
+                  <h2 className="text-xl font-bold mb-6">
+                    Answer these questions — {session.flashcards?.length} total
+                  </h2>
+                  <div className="space-y-6">
+                    {session.flashcards?.map((card, i) => (
+                      <Card key={i}>
+                        <CardContent className="p-5">
+                          <p className="font-medium mb-3">
+                            <span className="text-muted-foreground text-sm mr-2">Q{i + 1}.</span>
+                            {card.question}
+                          </p>
+                          <textarea
+                            className="w-full border border-border rounded-lg p-3 text-sm resize-none outline-none focus:ring-2 focus:ring-primary/20"
+                            rows={3}
+                            placeholder="Type your answer here..."
+                            value={answers[i] || ''}
+                            onChange={(e) => setAnswers(prev => ({ ...prev, [i]: e.target.value }))}
+                          />
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                  <Button className="w-full mt-6" size="lg" onClick={submitAnswers}>
+                    Submit Answers
                   </Button>
-                </CardContent>
-              </Card>
+                </div>
+              )}
+            </div>
+          ) : currentPhase === 4 ? (
+            /* Phase 4 (Summary) */
+            <div className="flex-1 overflow-y-auto p-6">
+              <div className="max-w-2xl mx-auto">
+                <Card className="mb-6 bg-primary/5 border-primary/20">
+                  <CardContent className="p-6">
+                    <div className="flex items-center gap-3 mb-4">
+                      <Brain className="w-6 h-6 text-primary" />
+                      <p className="font-semibold">AI Summary</p>
+                    </div>
+                    <p className="text-sm text-muted-foreground leading-relaxed">
+                      Great session on <strong>{session.topic}</strong>! Here is a summary of what was covered.
+                      Each subgroup taught their assigned topics, the group practiced with flashcards,
+                      and everyone contributed to the discussion. Connect your AI service to get
+                      a detailed personalized summary based on your uploaded document.
+                    </p>
+                  </CardContent>
+                </Card>
+                <p className="text-sm text-muted-foreground text-center">
+                  Use the chat to ask final questions. The admin will end the session when ready.
+                </p>
+              </div>
             </div>
           ) : (
+            /* All other phases — Chat Interface */
             <>
               <div className="flex-1 overflow-y-auto p-6 space-y-4">
+                {messages.length === 0 && (
+                  <div className="text-center py-12">
+                    <MessageSquare className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
+                    <p className="text-muted-foreground text-sm">
+                      {currentPhase === 0
+                        ? 'Introduce yourself and share what you already know about this topic.'
+                        : currentPhase === 1
+                        ? 'Discuss your assigned topics with your subgroup.'
+                        : 'Share your findings with the whole group.'}
+                    </p>
+                  </div>
+                )}
                 {messages.map((msg) => (
                   <div key={msg.id}>
                     {msg.type === 'system' && (
@@ -341,7 +595,9 @@ export default function SessionRoom() {
                       <div className={`flex ${msg.sender === userName ? 'justify-end' : 'justify-start'}`}>
                         <div className="max-w-md">
                           {msg.sender !== userName && (
-                            <p className="text-xs font-medium text-muted-foreground mb-1 ml-1">{msg.sender}</p>
+                            <p className="text-xs font-medium text-muted-foreground mb-1 ml-1">
+                              {msg.sender}
+                            </p>
                           )}
                           <div className={`rounded-2xl px-4 py-2.5 ${
                             msg.sender === userName
@@ -350,7 +606,9 @@ export default function SessionRoom() {
                           }`}>
                             <p className="text-sm">{msg.text}</p>
                           </div>
-                          <p className={`text-xs text-muted-foreground mt-1 ${msg.sender === userName ? 'text-right' : ''}`}>
+                          <p className={`text-xs text-muted-foreground mt-1 ${
+                            msg.sender === userName ? 'text-right' : ''
+                          }`}>
                             {msg.time}
                           </p>
                         </div>
@@ -372,20 +630,6 @@ export default function SessionRoom() {
                     )}
                   </div>
                 ))}
-                {aiThinking && (
-                  <div className="flex gap-3">
-                    <div className="w-8 h-8 bg-purple-100 rounded-full flex items-center justify-center">
-                      <Brain className="w-4 h-4 text-purple-600 animate-pulse" />
-                    </div>
-                    <div className="bg-purple-50 border border-purple-100 rounded-2xl px-4 py-3">
-                      <div className="flex gap-1">
-                        <div className="w-2 h-2 bg-purple-400 rounded-full animate-bounce" style={{animationDelay: '0ms'}} />
-                        <div className="w-2 h-2 bg-purple-400 rounded-full animate-bounce" style={{animationDelay: '150ms'}} />
-                        <div className="w-2 h-2 bg-purple-400 rounded-full animate-bounce" style={{animationDelay: '300ms'}} />
-                      </div>
-                    </div>
-                  </div>
-                )}
                 <div ref={messagesEndRef} />
               </div>
 
@@ -394,7 +638,7 @@ export default function SessionRoom() {
                   <MessageSquare className="w-4 h-4 text-muted-foreground flex-shrink-0" />
                   <input
                     className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-                    placeholder="Type a message or /ai [question] to ask the AI..."
+                    placeholder="Type a message..."
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
@@ -403,9 +647,6 @@ export default function SessionRoom() {
                     <Send className="w-4 h-4" />
                   </Button>
                 </div>
-                <p className="text-xs text-muted-foreground mt-2 text-center">
-                  Use <span className="font-mono bg-secondary px-1 rounded">/ai [question]</span> to ask the AI facilitator
-                </p>
               </div>
             </>
           )}

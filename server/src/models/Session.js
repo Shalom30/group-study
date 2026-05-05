@@ -25,7 +25,15 @@ const sessionSchema = new mongoose.Schema({
   currentPhase: { type: Number, default: 0 },
   status: { type: String, enum: ['waiting', 'active', 'ended'], default: 'waiting' },
   timer: { type: Number, default: 0 },
-  phaseStartedAt: { type: Date }
+  phaseStartedAt: { type: Date },
+  messages: [{
+        id: String,
+        type: { type: String, enum: ['user', 'system', 'ai'], default: 'user' },
+        text: String,
+        sender: String,
+        time: String,
+        createdAt: { type: Date, default: Date.now }
+    }]
 }, { timestamps: true })
 
 module.exports = mongoose.model('Session', sessionSchema)

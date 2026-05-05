@@ -6,14 +6,9 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import api from '../../services/api'
-import { 
-  Users, 
-  Mail, 
-  Crown, 
-  ArrowLeft,
-  UserPlus,
-  Play,
-  X
+import {
+  Users, ArrowLeft, UserPlus, Play,
+  X, Crown, FileText, Upload, Loader2
 } from 'lucide-react'
 
 export default function GroupDetail() {
@@ -22,13 +17,26 @@ export default function GroupDetail() {
   const [group, setGroup] = useState(null)
   const [loading, setLoading] = useState(true)
   const [showInvite, setShowInvite] = useState(false)
+  const [showCreateSession, setShowCreateSession] = useState(false)
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteLoading, setInviteLoading] = useState(false)
   const [inviteError, setInviteError] = useState('')
   const [inviteSuccess, setInviteSuccess] = useState('')
+  const [sessionTopic, setSessionTopic] = useState('')
+  const [sessionFile, setSessionFile] = useState(null)
+  const [sessionLoading, setSessionLoading] = useState(false)
+  const [sessionError, setSessionError] = useState('')
+  const [activeSession, setActiveSession] = useState(null)
+  const [currentUserId, setCurrentUserId] = useState(null)
 
   useEffect(() => {
     fetchGroup()
+    fetchActiveSession()
+    const token = localStorage.getItem('token')
+    if (token) {
+      const payload = JSON.parse(atob(token.split('.')[1]))
+      setCurrentUserId(payload.id)
+    }
   }, [id])
 
   const fetchGroup = async () => {
@@ -39,6 +47,15 @@ export default function GroupDetail() {
       console.error(err)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const fetchActiveSession = async () => {
+    try {
+      const res = await api.get(`/sessions/group/${id}/active`)
+      setActiveSession(res.data)
+    } catch (err) {
+      console.error(err)
     }
   }
 
@@ -57,6 +74,34 @@ export default function GroupDetail() {
       setInviteLoading(false)
     }
   }
+
+  const createSession = async (e) => {
+    e.preventDefault()
+    if (!sessionTopic.trim()) return
+    setSessionLoading(true)
+    setSessionError('')
+    try {
+      const formData = new FormData()
+      formData.append('groupId', id)
+      formData.append('topic', sessionTopic)
+      if (sessionFile) {
+        formData.append('document', sessionFile)
+      }
+      const res = await api.post('/sessions/create', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      })
+      navigate(`/session/${res.data._id}`)
+    } catch (err) {
+      setSessionError(err.response?.data?.message || 'Failed to create session')
+    } finally {
+      setSessionLoading(false)
+    }
+  }
+
+    const adminId = group?.admin?._id
+    ? group.admin._id.toString()
+    : group?.admin?.toString()
+    const isAdmin = adminId === currentUserId
 
   if (loading) {
     return (
@@ -81,7 +126,6 @@ export default function GroupDetail() {
   return (
     <MainLayout>
       <div className="max-w-4xl mx-auto">
-        {/* Header */}
         <div className="flex items-center gap-4 mb-8">
           <Button variant="ghost" size="sm" onClick={() => navigate('/groups')}>
             <ArrowLeft className="w-4 h-4 mr-2" />
@@ -96,7 +140,9 @@ export default function GroupDetail() {
             </div>
             <div>
               <h1 className="text-3xl font-bold">{group.name}</h1>
-              <p className="text-muted-foreground mt-1">{group.description || 'No description'}</p>
+              <p className="text-muted-foreground mt-1">
+                {group.description || 'No description'}
+              </p>
               <p className="text-sm text-muted-foreground mt-1">
                 {group.members.length} member{group.members.length !== 1 ? 's' : ''}
               </p>
@@ -107,12 +153,46 @@ export default function GroupDetail() {
               <UserPlus className="w-4 h-4 mr-2" />
               Invite
             </Button>
-            <Button onClick={() => navigate(`/session/${id}`)}>
-              <Play className="w-4 h-4 mr-2" />
-              Start Session
-            </Button>
+            {activeSession ? (
+              <Button onClick={() => navigate(`/session/${activeSession._id}`)}>
+                <Play className="w-4 h-4 mr-2" />
+                Join Active Session
+              </Button>
+            ) : isAdmin ? (
+              <Button onClick={() => setShowCreateSession(true)}>
+                <Play className="w-4 h-4 mr-2" />
+                Start Session
+              </Button>
+            ) : (
+              <Button disabled variant="outline">
+                Waiting for session...
+              </Button>
+            )}
           </div>
         </div>
+
+        {/* Active Session Banner */}
+        {activeSession && (
+          <div className="mb-6 bg-green-50 border border-green-200 rounded-xl p-4 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse" />
+              <div>
+                <p className="font-medium text-green-800">
+                  Active Session: {activeSession.topic}
+                </p>
+                <p className="text-sm text-green-600">
+                  Phase {activeSession.currentPhase + 1} — Click to join
+                </p>
+              </div>
+            </div>
+            <Button
+              size="sm"
+              onClick={() => navigate(`/session/${activeSession._id}`)}
+            >
+              Join Now
+            </Button>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {/* Members */}
@@ -126,7 +206,10 @@ export default function GroupDetail() {
             <CardContent>
               <div className="space-y-3">
                 {group.members.map((member, i) => (
-                  <div key={i} className="flex items-center gap-3 p-3 rounded-lg bg-secondary/50">
+                  <div
+                    key={i}
+                    className="flex items-center gap-3 p-3 rounded-lg bg-secondary/50"
+                  >
                     <div className="w-9 h-9 bg-primary/10 rounded-full flex items-center justify-center">
                       <span className="text-sm font-semibold text-primary">
                         {member.name ? member.name.charAt(0).toUpperCase() : 'U'}
@@ -136,9 +219,10 @@ export default function GroupDetail() {
                       <p className="text-sm font-medium">{member.name || 'Member'}</p>
                       <p className="text-xs text-muted-foreground">{member.email || ''}</p>
                     </div>
-                    {group.admin === member._id || group.admin?._id === member._id ? (
+                    {(group.admin === member._id ||
+                      group.admin?._id === member._id) && (
                       <Crown className="w-4 h-4 text-yellow-500" />
-                    ) : null}
+                    )}
                   </div>
                 ))}
               </div>
@@ -151,32 +235,146 @@ export default function GroupDetail() {
               <CardTitle>Quick Actions</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              <Button 
-                className="w-full justify-start" 
-                onClick={() => navigate(`/session/${id}`)}
-              >
-                <Play className="w-4 h-4 mr-3" />
-                Start Study Session
-              </Button>
-              <Button 
-                variant="outline" 
+              {isAdmin && !activeSession && (
+                <Button
+                  className="w-full justify-start"
+                  onClick={() => setShowCreateSession(true)}
+                >
+                  <Play className="w-4 h-4 mr-3" />
+                  Start New Study Session
+                </Button>
+              )}
+              {activeSession && (
+                <Button
+                  className="w-full justify-start"
+                  onClick={() => navigate(`/session/${activeSession._id}`)}
+                >
+                  <Play className="w-4 h-4 mr-3" />
+                  Join Active Session
+                </Button>
+              )}
+              <Button
+                variant="outline"
                 className="w-full justify-start"
                 onClick={() => setShowInvite(true)}
               >
                 <UserPlus className="w-4 h-4 mr-3" />
                 Invite Members
               </Button>
-              <Button 
-                variant="outline" 
+              <Button
+                variant="outline"
                 className="w-full justify-start"
                 onClick={() => navigate('/documents')}
               >
-                <Mail className="w-4 h-4 mr-3" />
+                <FileText className="w-4 h-4 mr-3" />
                 Upload Documents
               </Button>
             </CardContent>
           </Card>
         </div>
+
+        {/* Create Session Modal */}
+        {showCreateSession && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <Card className="w-full max-w-lg mx-4">
+              <CardHeader className="flex flex-row items-center justify-between">
+                <div>
+                  <CardTitle>Start Study Session</CardTitle>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Upload your study material and set a topic
+                  </p>
+                </div>
+                <button onClick={() => setShowCreateSession(false)}>
+                  <X className="w-5 h-5 text-muted-foreground hover:text-foreground" />
+                </button>
+              </CardHeader>
+              <CardContent>
+                <form onSubmit={createSession} className="space-y-5">
+                  {sessionError && (
+                    <div className="bg-destructive/10 text-destructive text-sm p-3 rounded-md">
+                      {sessionError}
+                    </div>
+                  )}
+
+                  <div className="space-y-2">
+                    <Label>Study Topic</Label>
+                    <Input
+                      placeholder="e.g. Data Structures - Binary Trees"
+                      value={sessionTopic}
+                      onChange={(e) => setSessionTopic(e.target.value)}
+                      required
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      This is what the group will study today
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Study Material (PDF)</Label>
+                    <div className="border-2 border-dashed border-border rounded-xl p-5 text-center">
+                      <Upload className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
+                      <label className="cursor-pointer">
+                        <input
+                          type="file"
+                          accept=".pdf"
+                          onChange={(e) => setSessionFile(e.target.files[0])}
+                          className="hidden"
+                        />
+                        <span className="text-sm text-primary hover:underline font-medium">
+                          {sessionFile ? sessionFile.name : 'Click to upload PDF'}
+                        </span>
+                      </label>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Optional but recommended — AI will use this to generate
+                        topics and flashcards
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="bg-secondary/50 rounded-xl p-4">
+                    <p className="text-sm font-medium mb-2">
+                      What happens when you start:
+                    </p>
+                    <ul className="text-xs text-muted-foreground space-y-1">
+                      <li>✅ Members are divided into subgroups of max 3</li>
+                      <li>✅ Topics are distributed across subgroups</li>
+                      <li>✅ Flashcards are prepared for the practice phase</li>
+                      <li>✅ All members are notified to join</li>
+                    </ul>
+                  </div>
+
+                  <div className="flex gap-3 pt-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="flex-1"
+                      onClick={() => setShowCreateSession(false)}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      type="submit"
+                      className="flex-1"
+                      disabled={sessionLoading || !sessionTopic.trim()}
+                    >
+                      {sessionLoading ? (
+                        <>
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          Creating...
+                        </>
+                      ) : (
+                        <>
+                          <Play className="w-4 h-4 mr-2" />
+                          Start Session
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                </form>
+              </CardContent>
+            </Card>
+          </div>
+        )}
 
         {/* Invite Modal */}
         {showInvite && (
@@ -184,15 +382,17 @@ export default function GroupDetail() {
             <Card className="w-full max-w-md mx-4">
               <CardHeader className="flex flex-row items-center justify-between">
                 <CardTitle>Invite to Group</CardTitle>
-                <button onClick={() => { setShowInvite(false); setInviteSuccess(''); setInviteError('') }}>
+                <button
+                  onClick={() => {
+                    setShowInvite(false)
+                    setInviteSuccess('')
+                    setInviteError('')
+                  }}
+                >
                   <X className="w-5 h-5 text-muted-foreground hover:text-foreground" />
                 </button>
               </CardHeader>
               <CardContent>
-                <p className="text-sm text-muted-foreground mb-4">
-                  Enter the email address of the person you want to invite. They will receive 
-                  a pending invitation even if they don't have an account yet.
-                </p>
                 <form onSubmit={sendInvite} className="space-y-4">
                   {inviteError && (
                     <div className="bg-destructive/10 text-destructive text-sm p-3 rounded-md">
@@ -215,11 +415,23 @@ export default function GroupDetail() {
                     />
                   </div>
                   <div className="flex gap-3">
-                    <Button type="button" variant="outline" className="flex-1" 
-                      onClick={() => { setShowInvite(false); setInviteSuccess(''); setInviteError('') }}>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="flex-1"
+                      onClick={() => {
+                        setShowInvite(false)
+                        setInviteSuccess('')
+                        setInviteError('')
+                      }}
+                    >
                       Close
                     </Button>
-                    <Button type="submit" className="flex-1" disabled={inviteLoading}>
+                    <Button
+                      type="submit"
+                      className="flex-1"
+                      disabled={inviteLoading}
+                    >
                       {inviteLoading ? 'Sending...' : 'Send Invite'}
                     </Button>
                   </div>

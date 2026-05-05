@@ -3,6 +3,7 @@ const cors = require('cors')
 const http = require('http')
 const { Server } = require('socket.io')
 const connectDB = require('./config/db')
+const Session = require('./models/Session')
 require('dotenv').config()
 
 const sessionRoutes = require('./routes/sessionRoutes.js')
@@ -60,7 +61,13 @@ io.on('connection', (socket) => {
     console.log(`${userName} joined session ${groupId}`)
   })
 
-  socket.on('send-message', ({ groupId, message }) => {
+  socket.on('send-message', async ({ groupId, message }) => {
+    try {
+      await Session.findOneAndUpdate(
+        { group: groupId, status: { $in: ['waiting', 'active'] } },
+        { $push: { messages: message } }
+      )
+    } catch (e) { console.error(e) }
     io.to(groupId).emit('receive-message', message)
   })
 
