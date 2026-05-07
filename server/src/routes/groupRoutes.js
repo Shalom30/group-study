@@ -77,4 +77,20 @@ router.get('/:id', authMiddleware, async (req, res) => {
   }
 })
 
+// DELETE GROUP (admin only)
+router.delete('/:id', authMiddleware, async (req, res) => {
+  try {
+    const group = await Group.findById(req.params.id)
+    if (!group) return res.status(404).json({ message: 'Group not found' })
+    if (group.admin.toString() !== req.user.id) {
+      return res.status(403).json({ message: 'Only the group admin can delete this group' })
+    }
+    await Group.findByIdAndDelete(req.params.id)
+    await Invitation.deleteMany({ group: req.params.id })
+    res.json({ message: 'Group deleted' })
+  } catch (err) {
+    res.status(500).json({ message: err.message })
+  }
+})
+
 module.exports = router

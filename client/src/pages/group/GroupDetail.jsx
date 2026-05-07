@@ -8,7 +8,8 @@ import { Label } from '@/components/ui/label'
 import api from '../../services/api'
 import {
   Users, ArrowLeft, UserPlus, Play,
-  X, Crown, FileText, Upload, Loader2
+  X, Crown, FileText, Upload, Loader2, Trash2,
+  History, Trophy, Calendar
 } from 'lucide-react'
 
 export default function GroupDetail() {
@@ -28,10 +29,16 @@ export default function GroupDetail() {
   const [sessionError, setSessionError] = useState('')
   const [activeSession, setActiveSession] = useState(null)
   const [currentUserId, setCurrentUserId] = useState(null)
+  const [deleteLoading, setDeleteLoading] = useState(false)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [pastSessions, setPastSessions] = useState([])
+  const [pastLoading, setPastLoading] = useState(false)
 
   useEffect(() => {
     fetchGroup()
     fetchActiveSession()
+    fetchPastSessions()
+
     const token = localStorage.getItem('token')
     if (token) {
       const payload = JSON.parse(atob(token.split('.')[1]))
@@ -59,6 +66,18 @@ export default function GroupDetail() {
     }
   }
 
+  const fetchPastSessions = async () => {
+    setPastLoading(true)
+    try {
+      const res = await api.get(`/sessions/group/${id}/history`)
+      setPastSessions(res.data)
+    } catch (err) {
+      console.error(err)
+    } finally {
+      setPastLoading(false)
+    }
+  }
+  
   const sendInvite = async (e) => {
     e.preventDefault()
     setInviteLoading(true)
@@ -98,10 +117,21 @@ export default function GroupDetail() {
     }
   }
 
+    const deleteGroup = async () => {
+    setDeleteLoading(true)
+    try {
+        await api.delete(`/groups/${id}`)
+        navigate('/groups')
+    } catch (err) {
+        console.error(err)
+    } finally {
+        setDeleteLoading(false)
+    }
+    }
     const adminId = group?.admin?._id
-    ? group.admin._id.toString()
-    : group?.admin?.toString()
-    const isAdmin = adminId === currentUserId
+        ? group.admin._id.toString()
+        : group?.admin?.toString() ?? ''
+    const isAdmin = !!adminId && adminId === currentUserId
 
   if (loading) {
     return (
@@ -123,6 +153,20 @@ export default function GroupDetail() {
     )
   }
 
+  const isMember = group.members?.some(
+    m => (m._id || m).toString() === currentUserId
+  )
+  if (!isMember && currentUserId) {
+    return (
+      <MainLayout>
+        <div className="flex items-center justify-center h-64 flex-col gap-3">
+          <p className="text-muted-foreground font-medium">You are not a member of this group.</p>
+          <Button onClick={() => navigate('/groups')}>Back to Groups</Button>
+        </div>
+      </MainLayout>
+    )
+  }
+
   return (
     <MainLayout>
       <div className="max-w-4xl mx-auto">
@@ -133,9 +177,9 @@ export default function GroupDetail() {
           </Button>
         </div>
 
-        <div className="flex items-start justify-between mb-8">
-          <div className="flex items-center gap-4">
-            <div className="w-16 h-16 bg-primary/10 rounded-2xl flex items-center justify-center">
+        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 mb-6 md:mb-8">
+          <div className="flex items-center gap-3 md:gap-4">
+            <div className="w-12 h-12 md:w-16 md:h-16 bg-primary/10 rounded-2xl flex items-center justify-center flex-shrink-0">
               <Users className="w-8 h-8 text-primary" />
             </div>
             <div>
@@ -148,24 +192,31 @@ export default function GroupDetail() {
               </p>
             </div>
           </div>
-          <div className="flex gap-3">
-            <Button variant="outline" onClick={() => setShowInvite(true)}>
-              <UserPlus className="w-4 h-4 mr-2" />
-              Invite
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" size="sm" onClick={() => setShowInvite(true)}>
+              <UserPlus className="w-4 h-4 mr-1 md:mr-2" />
+              <span className="hidden sm:inline">Invite</span>
             </Button>
             {activeSession ? (
-              <Button onClick={() => navigate(`/session/${activeSession._id}`)}>
-                <Play className="w-4 h-4 mr-2" />
-                Join Active Session
+              <Button size="sm" onClick={() => navigate(`/session/${activeSession._id}`)}>
+                <Play className="w-4 h-4 mr-1 md:mr-2" />
+                <span className="hidden sm:inline">Join </span>Session
               </Button>
             ) : isAdmin ? (
-              <Button onClick={() => setShowCreateSession(true)}>
-                <Play className="w-4 h-4 mr-2" />
-                Start Session
+              <Button size="sm" onClick={() => setShowCreateSession(true)}>
+                <Play className="w-4 h-4 mr-1 md:mr-2" />
+                <span className="hidden sm:inline">Start </span>Session
               </Button>
             ) : (
-              <Button disabled variant="outline">
-                Waiting for session...
+              <Button disabled variant="outline" size="sm">
+                <span className="hidden sm:inline">Waiting for session...</span>
+                <span className="sm:hidden">Waiting...</span>
+              </Button>
+            )}
+            {isAdmin && (
+              <Button variant="destructive" size="sm" onClick={() => setShowDeleteConfirm(true)}>
+                <Trash2 className="w-4 h-4" />
+                <span className="hidden sm:inline ml-2">Delete</span>
               </Button>
             )}
           </div>
@@ -272,6 +323,83 @@ export default function GroupDetail() {
             </CardContent>
           </Card>
         </div>
+        {/* Past Sessions */}
+        <div className="mt-8">
+          <div className="flex items-center gap-2 mb-4">
+            <History className="w-5 h-5 text-muted-foreground" />
+            <h2 className="text-lg font-semibold">Past Sessions</h2>
+          </div>
+
+          {pastLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : pastSessions.length === 0 ? (
+            <div className="text-center py-10 border border-dashed border-border rounded-xl">
+              <History className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
+              <p className="text-sm text-muted-foreground">No past sessions yet.</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Completed sessions will appear here.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {pastSessions.map((s, i) => {
+                const avgScore = s.scores?.length > 0
+                  ? Math.round(s.scores.reduce((a, sc) => a + sc.score, 0) / s.scores.length)
+                  : null
+                const date = new Date(s.updatedAt).toLocaleDateString('en-US', {
+                  weekday: 'short', month: 'short', day: 'numeric', year: 'numeric'
+                })
+                return (
+                  <div key={i} className="flex items-center gap-4 p-4 rounded-xl border border-border bg-card hover:bg-secondary/30 transition-colors">
+                    <div className="w-10 h-10 bg-primary/10 rounded-xl flex items-center justify-center flex-shrink-0">
+                      <FileText className="w-5 h-5 text-primary" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-sm truncate">{s.topic}</p>
+                      <div className="flex items-center gap-3 mt-0.5">
+                        <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                          <Calendar className="w-3 h-3" />{date}
+                        </span>
+                        <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                          <Users className="w-3 h-3" />
+                          {s.scores?.length || 0} participant{s.scores?.length !== 1 ? 's' : ''}
+                        </span>
+                      </div>
+                    </div>
+                    {/* Mobile score — shows only on small screens */}
+                    <div className="sm:hidden flex-shrink-0">
+                      {avgScore !== null ? (
+                        <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${avgScore >= 70 ? 'bg-green-100 text-green-700' : avgScore >= 40 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'}`}>
+                          {avgScore}%
+                        </span>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
+                    </div>
+                    <div className="hidden sm:flex items-center gap-3 flex-shrink-0">
+                      {avgScore !== null && (
+                        <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold ${avgScore >= 70 ? 'bg-green-100 text-green-700' : avgScore >= 40 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'}`}>
+                          <Trophy className="w-3 h-3" />
+                          Avg {avgScore}%
+                        </div>
+                      )}
+                      {avgScore === null && (
+                        <span className="text-xs text-muted-foreground bg-secondary px-3 py-1 rounded-full">
+                          No scores
+                        </span>
+                      )}
+                      <span className="text-xs bg-secondary text-muted-foreground px-2 py-1 rounded-full">
+                        Phase {s.currentPhase + 1} reached
+                      </span>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
 
         {/* Create Session Modal */}
         {showCreateSession && (
@@ -375,6 +503,37 @@ export default function GroupDetail() {
             </Card>
           </div>
         )}
+
+        {/* Delete Group Confirmation Modal */}
+        {showDeleteConfirm && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <Card className="w-full max-w-md mx-4">
+              <CardHeader>
+                <CardTitle className="text-destructive">Delete Group</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <p className="text-sm text-muted-foreground">
+                  Are you sure you want to delete <strong>{group.name}</strong>?
+                  This will permanently remove the group and all its invitations.
+                  This action cannot be undone.
+                </p>
+                <div className="flex gap-3">
+                  <Button variant="outline" className="flex-1"
+                    onClick={() => setShowDeleteConfirm(false)} disabled={deleteLoading}>
+                    Cancel
+                  </Button>
+                  <Button variant="destructive" className="flex-1"
+                    onClick={deleteGroup} disabled={deleteLoading}>
+                    {deleteLoading
+                      ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Deleting...</>
+                      : 'Yes, Delete Group'}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
 
         {/* Invite Modal */}
         {showInvite && (

@@ -27,11 +27,11 @@ export default function Landing() {
             </div>
             <span className="font-bold text-xl">NoteLearn</span>
           </div>
-          <div className="flex items-center gap-3">
-            <Button variant="ghost" onClick={() => navigate('/login')}>
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" onClick={() => navigate('/login')}>
               Sign In
             </Button>
-            <Button onClick={() => navigate('/register')}>
+            <Button size="sm" onClick={() => navigate('/register')} className="hidden sm:flex">
               Get Started Free
             </Button>
           </div>
@@ -45,21 +45,21 @@ export default function Landing() {
             <Zap className="w-4 h-4" />
             AI-Powered Study Platform for African Universities
           </div>
-          <h1 className="text-5xl md:text-6xl font-bold leading-tight mb-6">
+          <h1 className="text-3xl sm:text-5xl md:text-6xl font-bold leading-tight mb-6">
             Study Smarter,{' '}
             <span className="text-primary">Together</span>
           </h1>
-          <p className="text-xl text-muted-foreground mb-10 max-w-2xl mx-auto leading-relaxed">
+          <p className="text-base md:text-xl text-muted-foreground mb-8 md:mb-10 max-w-2xl mx-auto leading-relaxed">
             NoteLearn transforms your study materials into interactive learning experiences. 
             Upload your notes, get AI-generated summaries and flashcards, and collaborate 
             in intelligent live study groups.
           </p>
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-            <Button size="lg" className="px-8 h-12 text-base" onClick={() => navigate('/register')}>
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 w-full sm:w-auto">
+            <Button size="lg" className="w-full sm:w-auto px-8 h-12 text-base" onClick={() => navigate('/register')}>
               Start Studying Free
               <ArrowRight className="w-5 h-5 ml-2" />
             </Button>
-            <Button size="lg" variant="outline" className="px-8 h-12 text-base" onClick={() => navigate('/login')}>
+            <Button size="lg" variant="outline" className="w-full sm:w-auto px-8 h-12 text-base" onClick={() => navigate('/login')}>
               Sign In
             </Button>
           </div>

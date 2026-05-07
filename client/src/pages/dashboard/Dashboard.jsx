@@ -49,8 +49,8 @@ export default function Dashboard() {
   return (
     <MainLayout>
       <div className="max-w-6xl mx-auto">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold">Welcome back 👋</h1>
+        <div className="mb-6 md:mb-8">
+          <h1 className="text-2xl md:text-3xl font-bold">Welcome back 👋</h1>
           <p className="text-muted-foreground mt-1">
             Here's what's happening with your studies today.
           </p>

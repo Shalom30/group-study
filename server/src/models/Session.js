@@ -5,7 +5,15 @@ const subGroupSchema = new mongoose.Schema({
   members: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   topics: [String],
   leaderId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-  isDone: { type: Boolean, default: false }
+  isDone: { type: Boolean, default: false },
+  messages: [{
+    id: String,
+    type: { type: String, enum: ['user', 'system', 'ai'], default: 'user' },
+    text: String,
+    sender: String,
+    time: String,
+    createdAt: { type: Date, default: Date.now }
+  }]
 })
 
 const flashcardSchema = new mongoose.Schema({
@@ -26,6 +34,14 @@ const sessionSchema = new mongoose.Schema({
   status: { type: String, enum: ['waiting', 'active', 'ended'], default: 'waiting' },
   timer: { type: Number, default: 0 },
   phaseStartedAt: { type: Date },
+  scores: [{
+        userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+        userName: String,
+        score: Number,
+        wrongCount: Number,
+        totalCount: Number,
+        submittedAt: { type: Date, default: Date.now }
+    }],
   messages: [{
         id: String,
         type: { type: String, enum: ['user', 'system', 'ai'], default: 'user' },
@@ -34,6 +50,7 @@ const sessionSchema = new mongoose.Schema({
         time: String,
         createdAt: { type: Date, default: Date.now }
     }]
+    
 }, { timestamps: true })
 
 module.exports = mongoose.model('Session', sessionSchema)

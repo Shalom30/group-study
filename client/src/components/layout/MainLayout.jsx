@@ -1,10 +1,12 @@
+import { useState } from 'react'
 import Sidebar from './Sidebar'
 
 export default function MainLayout({ children }) {
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen warm-bg">
       <Sidebar />
-      <main className="ml-64 p-8">
+      {/* Desktop: ml-64, Mobile: ml-0 with top padding for hamburger */}
+      <main className="md:ml-64 pt-16 md:pt-0 p-4 md:p-8 animate-fade-up">
         {children}
       </main>
     </div>

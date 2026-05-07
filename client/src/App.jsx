@@ -11,7 +11,12 @@ import Landing from './pages/Landing'
 
 
 const ProtectedRoute = ({ children }) => {
-  const { user } = useAuth()
+  const { user, authLoading } = useAuth()
+  if (authLoading) return (
+    <div className="min-h-screen flex items-center justify-center">
+      <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+    </div>
+  )
   return user ? children : <Navigate to="/login" />
 }
 

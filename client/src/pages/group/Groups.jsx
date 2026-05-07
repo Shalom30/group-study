@@ -50,9 +50,9 @@ export default function Groups() {
   return (
     <MainLayout>
       <div className="max-w-6xl mx-auto">
-        <div className="flex items-center justify-between mb-8">
+        <div className="flex items-center justify-between mb-6 md:mb-8">
           <div>
-            <h1 className="text-3xl font-bold">Study Groups</h1>
+            <h1 className="text-2xl md:text-3xl font-bold">Study Groups</h1>
             <p className="text-muted-foreground mt-1">
               Create and manage your collaborative study groups
             </p>
