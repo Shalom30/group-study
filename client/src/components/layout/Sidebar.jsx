@@ -27,7 +27,7 @@ export default function Sidebar() {
     <div className="flex flex-col h-full">
       {/* Logo */}
       <div className="px-6 py-5 border-b border-white/10">
-        <div className="flex items-center gap-3">
+        <Link to="/" className="flex items-center gap-3 hover:opacity-80 transition-opacity">
           <div className="w-9 h-9 rounded-xl flex items-center justify-center"
             style={{ background: 'linear-gradient(135deg, hsl(25 90% 48%), hsl(15 85% 52%))' }}>
             <GraduationCap className="w-5 h-5 text-white" />
@@ -36,7 +36,7 @@ export default function Sidebar() {
             <p className="font-bold text-lg leading-none text-white tracking-tight">NoteLearn</p>
             <p className="text-xs mt-0.5" style={{ color: 'hsl(var(--sidebar-muted))' }}>AI Study Platform</p>
           </div>
-        </div>
+        </Link>
       </div>
 
       {/* Nav */}
