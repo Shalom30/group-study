@@ -818,7 +818,7 @@ export default function SessionRoom() {
               <div className="border-t border-border p-4">
                 {mySubGroupIndex === presentingSubgroupIndex || allDebriefDone ? (
                   <div className="flex items-center gap-2 bg-secondary rounded-xl px-4 py-2">
-                    <Mic className="w-4 h-4 text-purple-500 flex-shrink-0" />
+                    {/* <Mic className="w-4 h-4 text-purple-500 flex-shrink-0" /> */}
                     <input
                       className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
                       placeholder="Share your subgroup's findings..."
