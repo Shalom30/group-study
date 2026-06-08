@@ -3,6 +3,8 @@ const router = express.Router()
 const authMiddleware = require('../middleware/auth.middleware')
 const Group = require('../models/Group')
 const Invitation = require('../models/Invitation')
+const { sendInvitationEmail } = require('../utils/email')
+const User = require('../models/User')
 
 router.post('/create', authMiddleware, async (req, res) => {
   try {
@@ -18,14 +20,39 @@ router.post('/create', authMiddleware, async (req, res) => {
 router.post('/invite', authMiddleware, async (req, res) => {
   try {
     const { email, groupId } = req.body
-    const group = await Group.findById(groupId)
+
+    // Basic email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({ message: 'Please enter a valid email address' })
+    }
+
+    const group = await Group.findById(groupId).populate('admin', 'name email')
     if (!group) return res.status(404).json({ message: 'Group not found' })
+
+    // Check if already a member
+    const existingUser = await User.findOne({ email })
+    if (existingUser && group.members.includes(existingUser._id)) {
+      return res.status(400).json({ message: 'This person is already a member of the group' })
+    }
+
     const existingInvite = await Invitation.findOne({ email, group: groupId, status: 'pending' })
-    if (existingInvite) return res.status(400).json({ message: 'User already invited' })
+    if (existingInvite) return res.status(400).json({ message: 'This person has already been invited' })
+
     const invite = new Invitation({ email, group: groupId, invitedBy: req.user.id })
     await invite.save()
-    res.json({ message: 'Invitation sent', invite })
+
+    // Send real email
+    await sendInvitationEmail({
+      toEmail: email,
+      groupName: group.name,
+      invitedByName: group.admin.name,
+      inviteId: invite._id
+    })
+
+    res.json({ message: 'Invitation sent successfully', invite })
   } catch (err) {
+    console.error('Invite error:', err)
     res.status(500).json({ message: err.message })
   }
 })
@@ -93,4 +120,19 @@ router.delete('/:id', authMiddleware, async (req, res) => {
   }
 })
 
+// Public invite link handler — checks if invite exists and redirects
+router.get('/invite-info/:inviteId', async (req, res) => {
+  try {
+    const invite = await Invitation.findById(req.params.inviteId).populate('group', 'name')
+    if (!invite) return res.status(404).json({ message: 'Invitation not found or expired' })
+    res.json({
+      inviteId: invite._id,
+      groupName: invite.group.name,
+      email: invite.email,
+      status: invite.status
+    })
+  } catch (err) {
+    res.status(500).json({ message: err.message })
+  }
+})
 module.exports = router

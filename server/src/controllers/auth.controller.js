@@ -5,12 +5,33 @@ const jwt = require('jsonwebtoken')
 exports.register = async (req, res) => {
   try {
     const { name, email, password } = req.body
+
+    // Name validation — must contain letters, not purely numbers
+    if (!name || name.trim().length < 2) {
+      return res.status(400).json({ message: 'Name must be at least 2 characters' })
+    }
+    if (!/[a-zA-Z]/.test(name)) {
+      return res.status(400).json({ message: 'Name must contain letters, not just numbers' })
+    }
+
+    // Email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({ message: 'Please enter a valid email address' })
+    }
+
+    // Password validation
+    if (!password || password.length < 8) {
+      return res.status(400).json({ message: 'Password must be at least 8 characters' })
+    }
+
     const userExists = await User.findOne({ email })
     if (userExists) {
-      return res.status(400).json({ message: 'User already exists' })
+      return res.status(400).json({ message: 'An account with this email already exists' })
     }
+
     const hashedPassword = await bcrypt.hash(password, 10)
-    await User.create({ name, email, password: hashedPassword })
+    await User.create({ name: name.trim(), email: email.toLowerCase(), password: hashedPassword })
     res.status(201).json({ message: 'User registered successfully' })
   } catch (error) {
     res.status(500).json({ message: error.message })

@@ -8,7 +8,7 @@ import GroupDetail from './pages/group/GroupDetail'
 import Documents from './pages/documents/Documents'
 import SessionRoom from './pages/session/SessionRoom'
 import Landing from './pages/Landing'
-
+import InviteLanding from './pages/invite/InviteLanding'
 
 const ProtectedRoute = ({ children }) => {
   const { user, authLoading } = useAuth()
@@ -32,6 +32,7 @@ function AppRoutes() {
       <Route path="/groups/:id" element={<ProtectedRoute><GroupDetail /></ProtectedRoute>} />  
       <Route path="/documents" element={<ProtectedRoute><Documents /></      ProtectedRoute>} />
       <Route path="/session/:id" element={<ProtectedRoute><SessionRoom /></ProtectedRoute>} />
+      <Route path="/invite/:inviteId" element={<InviteLanding />} />
       <Route path="/" element={<Navigate to="/dashboard" />} />
     </Routes>
   )

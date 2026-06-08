@@ -22,7 +22,12 @@ export default function Login() {
     try {
       const res = await api.post('/auth/login', { email, password })
       login(res.data.token)
-      navigate('/dashboard')
+      const pendingInvite = localStorage.getItem('pendingInviteId')
+      if (pendingInvite) {
+        navigate('/dashboard?invite=' + pendingInvite)
+      } else {
+        navigate('/dashboard')
+      }
     } catch (err) {
       setError(err.response?.data?.message || 'Login failed')
     } finally {

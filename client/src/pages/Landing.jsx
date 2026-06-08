@@ -111,7 +111,7 @@ export default function Landing() {
                 icon: Zap,
                 color: 'bg-yellow-100 text-yellow-600',
                 title: 'Low Bandwidth Optimized',
-                description: 'Designed to work efficiently on Cameroonian internet speeds. Text-first approach with optional audio and visual enhancements.'
+                description: 'Designed to work efficiently on Cameroonian internet speeds. Text-first approach'
               }
             ].map((feature, i) => {
               const Icon = feature.icon
@@ -164,7 +164,7 @@ export default function Landing() {
             Ready to transform how you study?
           </h2>
           <p className="text-primary-foreground/80 text-lg mb-8">
-            Join thousands of students already using NoteLearn to study smarter.
+            Optimize your group Study sessions with NoteLearn.
           </p>
           <Button 
             size="lg" 
