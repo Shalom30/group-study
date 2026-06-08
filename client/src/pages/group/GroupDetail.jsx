@@ -33,6 +33,10 @@ export default function GroupDetail() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [pastSessions, setPastSessions] = useState([])
   const [pastLoading, setPastLoading] = useState(false)
+  const [bulkFile, setBulkFile] = useState(null)
+  const [bulkLoading, setBulkLoading] = useState(false)
+  const [bulkResults, setBulkResults] = useState(null)
+  const [inviteTab, setInviteTab] = useState('single')
 
   useEffect(() => {
     fetchGroup()
@@ -91,6 +95,58 @@ export default function GroupDetail() {
       setInviteError(err.response?.data?.message || 'Failed to send invite')
     } finally {
       setInviteLoading(false)
+    }
+  }
+
+  const sendBulkInvite = async (e) => {
+    e.preventDefault()
+    if (!bulkFile) return
+    setBulkLoading(true)
+    setBulkResults(null)
+
+    try {
+      // Read Excel file using SheetJS
+      const XLSX = await import('https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs')
+      const data = await bulkFile.arrayBuffer()
+      const workbook = XLSX.read(data)
+      const sheet = workbook.Sheets[workbook.SheetNames[0]]
+      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 })
+
+      // Extract emails from first column, skip header if it says "email"
+      const emails = rows
+        .map(row => row[0]?.toString().trim())
+        .filter(val => val && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val))
+
+      if (emails.length === 0) {
+        setBulkResults({ error: 'No valid emails found in the file. Make sure emails are in the first column.' })
+        setBulkLoading(false)
+        return
+      }
+
+      // Send each invite
+      let sent = 0
+      let alreadyInvited = 0
+      let failed = 0
+
+      for (const email of emails) {
+        try {
+          await api.post('/groups/invite', { email, groupId: id })
+          sent++
+        } catch (err) {
+          if (err.response?.data?.message?.includes('already')) {
+            alreadyInvited++
+          } else {
+            failed++
+          }
+        }
+      }
+
+      setBulkResults({ sent, alreadyInvited, failed, total: emails.length })
+      setBulkFile(null)
+    } catch (err) {
+      setBulkResults({ error: 'Failed to read the file. Make sure it is a valid .xlsx file.' })
+    } finally {
+      setBulkLoading(false)
     }
   }
 
@@ -537,64 +593,159 @@ export default function GroupDetail() {
 
         {/* Invite Modal */}
         {showInvite && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-            <Card className="w-full max-w-md mx-4">
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <Card className="w-full max-w-md">
               <CardHeader className="flex flex-row items-center justify-between">
-                <CardTitle>Invite to Group</CardTitle>
-                <button
-                  onClick={() => {
-                    setShowInvite(false)
-                    setInviteSuccess('')
-                    setInviteError('')
-                  }}
-                >
+                <CardTitle>Invite Members</CardTitle>
+                <button onClick={() => {
+                  setShowInvite(false)
+                  setInviteSuccess('')
+                  setInviteError('')
+                  setBulkResults(null)
+                  setBulkFile(null)
+                  setInviteTab('single')
+                }}>
                   <X className="w-5 h-5 text-muted-foreground hover:text-foreground" />
                 </button>
               </CardHeader>
               <CardContent>
-                <form onSubmit={sendInvite} className="space-y-4">
-                  {inviteError && (
-                    <div className="bg-destructive/10 text-destructive text-sm p-3 rounded-md">
-                      {inviteError}
+                {/* Tabs */}
+                <div className="flex gap-1 bg-secondary rounded-xl p-1 mb-5">
+                  <button
+                    onClick={() => setInviteTab('single')}
+                    className={`flex-1 text-sm py-2 rounded-lg font-medium transition-all ${
+                      inviteTab === 'single'
+                        ? 'bg-white text-foreground shadow-sm'
+                        : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    Single Invite
+                  </button>
+                  <button
+                    onClick={() => setInviteTab('bulk')}
+                    className={`flex-1 text-sm py-2 rounded-lg font-medium transition-all ${
+                      inviteTab === 'bulk'
+                        ? 'bg-white text-foreground shadow-sm'
+                        : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    Bulk Invite (Excel)
+                  </button>
+                </div>
+
+                {/* Single Invite Tab */}
+                {inviteTab === 'single' && (
+                  <form onSubmit={sendInvite} className="space-y-4">
+                    {inviteError && (
+                      <div className="bg-destructive/10 text-destructive text-sm p-3 rounded-md">
+                        {inviteError}
+                      </div>
+                    )}
+                    {inviteSuccess && (
+                      <div className="bg-green-50 text-green-700 text-sm p-3 rounded-md">
+                        ✅ {inviteSuccess}
+                      </div>
+                    )}
+                    <div className="space-y-2">
+                      <Label>Email Address</Label>
+                      <Input
+                        type="email"
+                        placeholder="classmate@example.com"
+                        value={inviteEmail}
+                        onChange={(e) => setInviteEmail(e.target.value)}
+                        required
+                      />
                     </div>
-                  )}
-                  {inviteSuccess && (
-                    <div className="bg-green-50 text-green-700 text-sm p-3 rounded-md">
-                      {inviteSuccess}
+                    <div className="flex gap-3">
+                      <Button type="button" variant="outline" className="flex-1"
+                        onClick={() => { setShowInvite(false); setInviteSuccess(''); setInviteError('') }}>
+                        Close
+                      </Button>
+                      <Button type="submit" className="flex-1" disabled={inviteLoading}>
+                        {inviteLoading ? (
+                          <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Sending...</>
+                        ) : 'Send Invite'}
+                      </Button>
                     </div>
-                  )}
-                  <div className="space-y-2">
-                    <Label>Email Address</Label>
-                    <Input
-                      type="email"
-                      placeholder="classmate@example.com"
-                      value={inviteEmail}
-                      onChange={(e) => setInviteEmail(e.target.value)}
-                      required
-                    />
-                  </div>
-                  <div className="flex gap-3">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="flex-1"
-                      onClick={() => {
-                        setShowInvite(false)
-                        setInviteSuccess('')
-                        setInviteError('')
-                      }}
-                    >
-                      Close
-                    </Button>
-                    <Button
-                      type="submit"
-                      className="flex-1"
-                      disabled={inviteLoading}
-                    >
-                      {inviteLoading ? 'Sending...' : 'Send Invite'}
-                    </Button>
-                  </div>
-                </form>
+                  </form>
+                )}
+
+                {/* Bulk Invite Tab */}
+                {inviteTab === 'bulk' && (
+                  <form onSubmit={sendBulkInvite} className="space-y-4">
+                    <div className="bg-secondary/50 rounded-xl p-4 text-sm text-muted-foreground space-y-1">
+                      <p className="font-medium text-foreground">How to prepare your Excel file:</p>
+                      <p>• Put all emails in the <strong>first column (Column A)</strong></p>
+                      <p>• One email per row</p>
+                      <p>• You can have a header like "Email" in row 1 — it will be skipped</p>
+                      <p>• Save as <strong>.xlsx</strong> format</p>
+                    </div>
+
+                    <div className="border-2 border-dashed border-border rounded-xl p-6 text-center">
+                      <Upload className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
+                      <label className="cursor-pointer">
+                        <input
+                          type="file"
+                          accept=".xlsx,.xls"
+                          onChange={(e) => {
+                            setBulkFile(e.target.files[0])
+                            setBulkResults(null)
+                          }}
+                          className="hidden"
+                        />
+                        <span className="text-sm text-primary hover:underline font-medium">
+                          {bulkFile ? bulkFile.name : 'Click to upload Excel file'}
+                        </span>
+                      </label>
+                      {bulkFile && (
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Ready to send invitations
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Results */}
+                    {bulkResults && !bulkResults.error && (
+                      <div className="bg-green-50 border border-green-200 rounded-xl p-4 space-y-1">
+                        <p className="text-sm font-semibold text-green-800">
+                          ✅ Bulk invite complete — {bulkResults.total} emails processed
+                        </p>
+                        <p className="text-xs text-green-700">
+                          {bulkResults.sent} invitation{bulkResults.sent !== 1 ? 's' : ''} sent successfully
+                        </p>
+                        {bulkResults.alreadyInvited > 0 && (
+                          <p className="text-xs text-yellow-700">
+                            {bulkResults.alreadyInvited} already invited or member
+                          </p>
+                        )}
+                        {bulkResults.failed > 0 && (
+                          <p className="text-xs text-red-600">
+                            {bulkResults.failed} failed to send
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {bulkResults?.error && (
+                      <div className="bg-destructive/10 text-destructive text-sm p-3 rounded-md">
+                        {bulkResults.error}
+                      </div>
+                    )}
+
+                    <div className="flex gap-3">
+                      <Button type="button" variant="outline" className="flex-1"
+                        onClick={() => { setShowInvite(false); setBulkResults(null); setBulkFile(null) }}>
+                        Close
+                      </Button>
+                      <Button type="submit" className="flex-1"
+                        disabled={bulkLoading || !bulkFile}>
+                        {bulkLoading ? (
+                          <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Sending all...</>
+                        ) : 'Send All Invites'}
+                      </Button>
+                    </div>
+                  </form>
+                )}
               </CardContent>
             </Card>
           </div>
