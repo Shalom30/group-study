@@ -134,6 +134,10 @@ io.on('connection', (socket) => {
   socket.on('dm-admin', ({ groupId, from, message }) => {
     io.to(groupId).emit('dm-received', { from, message, time: new Date().toLocaleTimeString() })
   })
+
+  socket.on('send-voice-note', ({ groupId, audioData, sender, time }) => {
+    io.to(groupId).emit('receive-voice-note', { audioData, sender, time })
+  })
   
   socket.on('score-submitted', ({ groupId, userName, score }) => {
     io.to(groupId).emit('score-submitted', { userName, score })

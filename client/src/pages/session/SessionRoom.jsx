@@ -7,9 +7,10 @@ import {
   ArrowLeft, Brain, Users, BookOpen,
   CheckCircle, Target, Send, Hand,
   Mic, MicOff, MessageSquare, Clock,
-  Trophy, AlertCircle, Loader2, Lock, Menu, X
+  Trophy, AlertCircle, Loader2, Lock, Menu, X, Phone
 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
+import VoiceRoom from '../session/VoiceRoom'
 
 const SOCKET_URL = 'http://localhost:5000'
 
@@ -64,6 +65,12 @@ export default function SessionRoom() {
   const [dmInput, setDmInput] = useState('')
   const [showDmPanel, setShowDmPanel] = useState(false)
   const [mentionSuggestions, setMentionSuggestions] = useState([])
+  const [isRecording, setIsRecording] = useState(false)
+  const mediaRecorderRef = useRef(null)
+  const audioChunksRef = useRef([])
+  const [showVoiceRoom, setShowVoiceRoom] = useState(false)
+  const [showChatOverlay, setShowChatOverlay] = useState(false)
+  const [dmUnread, setDmUnread] = useState(0)
 
   useEffect(() => {
     const token = localStorage.getItem('token')
@@ -183,10 +190,25 @@ export default function SessionRoom() {
       addGeneralSystemMessage(`${who} is ready to end the session ✅`)
     })
 
+    socket.on('receive-voice-note', ({ audioData, sender, time }) => {
+      const voiceMessage = {
+        id: Date.now() + Math.random(),
+        type: 'voice',
+        audioData,
+        sender,
+        time
+      }
+      if (currentPhase === 1) {
+        setSubgroupMessages(prev => [...prev, voiceMessage])
+      } else {
+        setGeneralMessages(prev => [...prev, voiceMessage])
+      }
+    })
+
     socket.on('dm-received', ({ from, message, time }) => {
-      if (isAdmin || from === userName) {
-        setDmMessages(prev => [...prev, { from, message, time }])
-        if (!showDmPanel) setShowDmPanel(true)
+      setDmMessages(prev => [...prev, { from, message, time }])
+      if (!showDmPanel && from !== userName) {
+        setDmUnread(n => n + 1)
       }
     })
 
@@ -442,6 +464,7 @@ export default function SessionRoom() {
   const sendDm = () => {
     if (!dmInput.trim()) return
     socketRef.current?.emit('dm-admin', { groupId: id, from: userName, message: dmInput.trim() })
+    setDmMessages(prev => [...prev, { from: userName, message: dmInput.trim(), time: new Date().toLocaleTimeString() }])
     setDmInput('')
   }
 
@@ -463,6 +486,42 @@ export default function SessionRoom() {
     setInput(input.slice(0, atIndex) + `@${name} `)
     setMentionSuggestions([])
   }
+
+  const startRecording = async () => {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    const mediaRecorder = new MediaRecorder(stream)
+    mediaRecorderRef.current = mediaRecorder
+    audioChunksRef.current = []
+
+    mediaRecorder.ondataavailable = (e) => {
+      if (e.data.size > 0) audioChunksRef.current.push(e.data)
+    }
+
+    mediaRecorder.onstop = () => {
+      const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
+      const reader = new FileReader()
+      reader.onloadend = () => {
+        const audioData = reader.result
+        socketRef.current?.emit('send-voice-note', {
+          groupId: id,
+          audioData,
+          sender: userName,
+          time: new Date().toLocaleTimeString()
+        })
+      }
+      reader.readAsDataURL(blob)
+      stream.getTracks().forEach(t => t.stop())
+    }
+
+    mediaRecorder.start()
+    setIsRecording(true)
+  }
+
+  const stopRecording = () => {
+    mediaRecorderRef.current?.stop()
+    setIsRecording(false)
+  }
+
   const raiseHand = () => {
     const newState = !handRaised
     setHandRaised(newState)
@@ -724,17 +783,28 @@ export default function SessionRoom() {
                 </Button>
               </div>
             )}
-            {isAdmin && dmMessages.length > 0 && (
+            {isAdmin && (
               <div className="mb-4">
                 <Button
                   variant="outline" size="sm" className="w-full justify-start"
-                  onClick={() => setShowDmPanel(p => !p)}
+                  onClick={() => { setShowDmPanel(p => !p); setDmUnread(0) }}
                 >
                   <MessageSquare className="w-4 h-4 mr-2" />
-                  DMs <span className="ml-auto bg-primary text-primary-foreground text-xs rounded-full px-1.5">{dmMessages.length}</span>
+                  DMs {dmUnread > 0 && <span className="ml-auto bg-primary text-primary-foreground text-xs rounded-full px-1.5">{dmUnread}</span>}
                 </Button>
               </div>
             )}
+            <div className="mb-4">
+              <Button
+                variant={showVoiceRoom ? 'default' : 'outline'}
+                size="sm"
+                className="w-full justify-start"
+                onClick={() => setShowVoiceRoom(v => !v)}
+              >
+                <Phone className="w-4 h-4 mr-2" />
+                {showVoiceRoom ? 'In Call 🟢' : 'Join Voice Call'}
+              </Button>
+            </div>
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Controls</p>
             <div className="space-y-2">
               <Button variant={isSpeaking ? 'default' : 'outline'} size="sm" className="w-full justify-start"
@@ -884,14 +954,14 @@ export default function SessionRoom() {
                         <span className="text-xs text-muted-foreground bg-secondary px-4 py-1.5 rounded-full">{msg.text}</span>
                       </div>
                     )}
-                    {msg.type === 'user' && (
+                    {msg.type === 'voice' && (
                       <div className={`flex ${msg.sender === userName ? 'justify-end' : 'justify-start'}`}>
                         <div className="max-w-md">
                           {msg.sender !== userName && (
                             <p className="text-xs font-medium text-muted-foreground mb-1 ml-1">{msg.sender}</p>
                           )}
-                          <div className={`rounded-2xl px-4 py-2.5 ${msg.sender === userName ? 'bg-primary text-primary-foreground rounded-tr-sm' : 'bg-secondary text-foreground rounded-tl-sm'}`}>
-                            <p className="text-sm">{msg.text}</p>
+                          <div className={`rounded-2xl px-3 py-2 ${msg.sender === userName ? 'bg-primary text-primary-foreground rounded-tr-sm' : 'bg-secondary rounded-tl-sm'}`}>
+                            <audio controls src={msg.audioData} className="h-8 w-48" />
                           </div>
                           <p className={`text-xs text-muted-foreground mt-1 ${msg.sender === userName ? 'text-right' : ''}`}>{msg.time}</p>
                         </div>
@@ -1224,14 +1294,14 @@ export default function SessionRoom() {
                         <span className="text-xs text-muted-foreground bg-secondary px-4 py-1.5 rounded-full">{msg.text}</span>
                       </div>
                     )}
-                    {msg.type === 'user' && (
+                    {msg.type === 'voice' && (
                       <div className={`flex ${msg.sender === userName ? 'justify-end' : 'justify-start'}`}>
                         <div className="max-w-md">
                           {msg.sender !== userName && (
                             <p className="text-xs font-medium text-muted-foreground mb-1 ml-1">{msg.sender}</p>
                           )}
-                          <div className={`rounded-2xl px-4 py-2.5 ${msg.sender === userName ? 'bg-primary text-primary-foreground rounded-tr-sm' : 'bg-secondary text-foreground rounded-tl-sm'}`}>
-                            <p className="text-sm">{msg.text}</p>
+                          <div className={`rounded-2xl px-3 py-2 ${msg.sender === userName ? 'bg-primary text-primary-foreground rounded-tr-sm' : 'bg-secondary rounded-tl-sm'}`}>
+                            <audio controls src={msg.audioData} className="h-8 w-48" />
                           </div>
                           <p className={`text-xs text-muted-foreground mt-1 ${msg.sender === userName ? 'text-right' : ''}`}>{msg.time}</p>
                         </div>
@@ -1279,6 +1349,15 @@ export default function SessionRoom() {
                       onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
                     />
                   </div>
+                  <button
+                    onMouseDown={startRecording}
+                    onMouseUp={stopRecording}
+                    onTouchStart={startRecording}
+                    onTouchEnd={stopRecording}
+                    className={`p-2 rounded-lg flex-shrink-0 transition-colors ${isRecording ? 'bg-red-500 text-white animate-pulse' : 'text-muted-foreground hover:text-foreground'}`}
+                  >
+                    <Mic className="w-4 h-4" />
+                  </button>
                   <Button size="sm" onClick={sendMessage} disabled={!input.trim()}>
                     <Send className="w-4 h-4" />
                   </Button>
@@ -1315,18 +1394,90 @@ export default function SessionRoom() {
               </div>
             ))}
           </div>
-          {!isAdmin && (
-            <div className="border-t border-border p-3 flex gap-2">
-              <input
-                className="flex-1 text-sm bg-secondary rounded-lg px-3 py-1.5 outline-none"
-                placeholder="Message admin..."
-                value={dmInput}
-                onChange={(e) => setDmInput(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && sendDm()}
-              />
-              <Button size="sm" onClick={sendDm} disabled={!dmInput.trim()}>
-                <Send className="w-3.5 h-3.5" />
+          <div className="border-t border-border p-3 flex gap-2">
+            <input
+              className="flex-1 text-sm bg-secondary rounded-lg px-3 py-1.5 outline-none"
+              placeholder={isAdmin ? 'Reply to student...' : 'Message admin...'}
+              value={dmInput}
+              onChange={(e) => setDmInput(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && sendDm()}
+            />
+            <Button size="sm" onClick={sendDm} disabled={!dmInput.trim()}>
+              <Send className="w-3.5 h-3.5" />
+            </Button>
+          </div>
+        </div>
+      )}
+      {/* Voice Room — full main area overlay */}
+      {showVoiceRoom && (
+        <div className="fixed z-30 flex" style={{ top: '53px', left: '256px', right: 0, bottom: 0 }}>
+          {/* Voice/screen area */}
+          <div className={`flex flex-col bg-background border-r border-border transition-all duration-300 ${showChatOverlay ? 'w-[60%]' : 'w-full'} p-4`}>
+            <div className="flex items-center justify-between mb-3 flex-shrink-0">
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+                <p className="text-sm font-semibold">Live Call</p>
+              </div>
+              <Button size="sm" variant="ghost" onClick={() => setShowVoiceRoom(false)}>
+                <X className="w-4 h-4" />
               </Button>
+            </div>
+            <div className="flex-1 min-h-0">
+              <VoiceRoom
+                sessionId={id}
+                onLeave={() => setShowVoiceRoom(false)}
+                onToggleChat={() => setShowChatOverlay(c => !c)}
+                showChat={showChatOverlay}
+              />
+            </div>
+          </div>
+
+          {/* Slide-in chat panel */}
+          {showChatOverlay && (
+            <div className="w-[40%] flex flex-col bg-card border-l border-border">
+              <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+                <p className="text-sm font-semibold">Chat</p>
+                <button onClick={() => setShowChatOverlay(false)}>
+                  <X className="w-4 h-4 text-muted-foreground" />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                {activeMessages.map((msg) => (
+                  <div key={msg.id || msg._id}>
+                    {msg.type === 'system' && (
+                      <div className="flex justify-center">
+                        <span className="text-xs text-muted-foreground bg-secondary px-3 py-1 rounded-full">{msg.text}</span>
+                      </div>
+                    )}
+                    {msg.type === 'user' && (
+                      <div className={`flex ${msg.sender === userName ? 'justify-end' : 'justify-start'}`}>
+                        <div className="max-w-[85%]">
+                          {msg.sender !== userName && (
+                            <p className="text-xs font-medium text-muted-foreground mb-1 ml-1">{msg.sender}</p>
+                          )}
+                          <div className={`rounded-2xl px-3 py-2 text-sm ${msg.sender === userName ? 'bg-primary text-primary-foreground' : 'bg-secondary'}`}>
+                            {msg.text}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <div className="border-t border-border p-3">
+                <div className="flex gap-2">
+                  <input
+                    className="flex-1 text-sm bg-secondary rounded-lg px-3 py-2 outline-none"
+                    placeholder="Type a message..."
+                    value={input}
+                    onChange={e => setInput(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && sendMessage()}
+                  />
+                  <Button size="sm" onClick={sendMessage} disabled={!input.trim()}>
+                    <Send className="w-3.5 h-3.5" />
+                  </Button>
+                </div>
+              </div>
             </div>
           )}
         </div>

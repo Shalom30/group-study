@@ -259,4 +259,30 @@ router.post('/:sessionId/kick', authMiddleware, async (req, res) => {
     res.status(500).json({ message: err.message })
   }
 })
+
+// LIVEKIT TOKEN
+router.get('/:sessionId/livekit-token', authMiddleware, async (req, res) => {
+  try {
+    const { AccessToken } = require('livekit-server-sdk')
+    const session = await Session.findById(req.params.sessionId)
+    if (!session) return res.status(404).json({ message: 'Session not found' })
+
+    const token = new AccessToken(
+      process.env.LIVEKIT_API_KEY,
+      process.env.LIVEKIT_API_SECRET,
+      { identity: req.user.name || req.user.id }
+    )
+    token.addGrant({
+      roomJoin: true,
+      room: req.params.sessionId,
+      canPublish: true,
+      canSubscribe: true,
+      canPublishScreen: true
+    })
+
+    res.json({ token: await token.toJwt(), url: process.env.LIVEKIT_URL })
+  } catch (err) {
+    res.status(500).json({ message: err.message })
+  }
+})
 module.exports = router
