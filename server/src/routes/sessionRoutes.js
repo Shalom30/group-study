@@ -9,19 +9,43 @@ const storage = multer.memoryStorage()
 const upload = multer({ storage, limits: { fileSize: 10 * 1024 * 1024 } })
 
 // CREATE SESSION
-router.post('/create', authMiddleware, upload.single('document'), async (req, res) => {
+router.post('/create', authMiddleware, upload.array('documents', 10), async (req, res) => {
   try {
     const { groupId, topic } = req.body
+
     const group = await Group.findById(groupId).populate('members', 'name email')
     if (!group) return res.status(404).json({ message: 'Group not found' })
 
-    let documentText = ''
-    let documentName = ''
-    if (req.file) {
-      documentName = req.file.originalname
-      documentText = 'DOCUMENT_UPLOADED:' + req.file.originalname
+    // ── Member limit ────────────────────────────────────────────────
+    if (group.members.length > 21)
+      return res.status(400).json({ message: 'Session cannot exceed 21 members. Please split into smaller groups.' })
+
+    // ── Parse uploaded PDFs ─────────────────────────────────────────
+    const documents = []
+    if (req.files && req.files.length > 0) {
+      for (const file of req.files) {
+        try {
+          let text = ''
+          if (file.mimetype === 'application/pdf' || file.originalname.endsWith('.pdf')) {
+            const pdfParse = require('pdf-parse')
+            const parsed = await pdfParse(file.buffer)
+            text = parsed.text
+          } else if (
+            file.mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+            file.originalname.endsWith('.docx')
+          ) {
+            const mammoth = require('mammoth')
+            const result = await mammoth.extractRawText({ buffer: file.buffer })
+            text = result.value
+          }
+          documents.push({ name: file.originalname, text })
+        } catch (e) {
+          documents.push({ name: file.originalname, text: '' })
+        }
+      }
     }
 
+    // ── Build subgroups ─────────────────────────────────────────────
     const members = group.members
     const subGroups = []
     const subGroupSize = 3
@@ -62,8 +86,7 @@ router.post('/create', authMiddleware, upload.single('document'), async (req, re
       group: groupId,
       createdBy: req.user.id,
       topic,
-      documentText,
-      documentName,
+      documents,
       topics: placeholderTopics,
       subGroups,
       flashcards: placeholderFlashcards,
@@ -79,7 +102,7 @@ router.post('/create', authMiddleware, upload.single('document'), async (req, re
   }
 })
 
-// ⚠️ THIS MUST BE BEFORE /:sessionId
+// ⚠️ MUST BE BEFORE /:sessionId
 // GET ACTIVE SESSION FOR A GROUP
 router.get('/group/:groupId/active', authMiddleware, async (req, res) => {
   try {
@@ -158,7 +181,7 @@ router.post('/:sessionId/end', authMiddleware, async (req, res) => {
   }
 })
 
-// DELETE SESSION (admin only)
+// DELETE SESSION
 router.delete('/:sessionId', authMiddleware, async (req, res) => {
   try {
     const session = await Session.findById(req.params.sessionId)
@@ -193,11 +216,7 @@ router.post('/:sessionId/score', authMiddleware, async (req, res) => {
     const { score, wrongCount, totalCount } = req.body
     const session = await Session.findById(req.params.sessionId)
     if (!session) return res.status(404).json({ message: 'Session not found' })
-
-    // Remove old score for this user if exists, then push new one
-    session.scores = session.scores.filter(
-      s => s.userId.toString() !== req.user.id
-    )
+    session.scores = session.scores.filter(s => s.userId.toString() !== req.user.id)
     session.scores.push({
       userId: req.user.id,
       userName: req.user.name,
