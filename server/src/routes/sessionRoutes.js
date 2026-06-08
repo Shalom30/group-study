@@ -246,4 +246,17 @@ router.get('/group/:groupId/history', authMiddleware, async (req, res) => {
   }
 })
 
+
+// KICK MEMBER
+router.post('/:sessionId/kick', authMiddleware, async (req, res) => {
+  try {
+    const session = await Session.findById(req.params.sessionId)
+    if (!session) return res.status(404).json({ message: 'Session not found' })
+    if (session.createdBy.toString() !== req.user.id)
+      return res.status(403).json({ message: 'Only the session creator can kick members' })
+    res.json({ message: 'Kick signal sent' })
+  } catch (err) {
+    res.status(500).json({ message: err.message })
+  }
+})
 module.exports = router

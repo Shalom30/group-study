@@ -24,7 +24,7 @@ export default function GroupDetail() {
   const [inviteError, setInviteError] = useState('')
   const [inviteSuccess, setInviteSuccess] = useState('')
   const [sessionTopic, setSessionTopic] = useState('')
-  const [sessionFile, setSessionFile] = useState(null)
+  const [sessionFiles, setSessionFiles] = useState([])
   const [sessionLoading, setSessionLoading] = useState(false)
   const [sessionError, setSessionError] = useState('')
   const [activeSession, setActiveSession] = useState(null)
@@ -166,9 +166,7 @@ export default function GroupDetail() {
       const formData = new FormData()
       formData.append('groupId', id)
       formData.append('topic', sessionTopic)
-      if (sessionFile) {
-        formData.append('document', sessionFile)
-      }
+      sessionFiles.forEach(f => formData.append('documents', f))
       const res = await api.post('/sessions/create', formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       })
@@ -322,7 +320,6 @@ export default function GroupDetail() {
                 <span className="sm:hidden">Waiting...</span>
               </Button>
             )}
-            {/* Delete — main admin only */}
             {isAdmin && (
               <Button variant="destructive" size="sm" onClick={() => setShowDeleteConfirm(true)}>
                 <Trash2 className="w-4 h-4" />
@@ -386,7 +383,6 @@ export default function GroupDetail() {
                             <Crown className="w-3 h-3" /> Co-Admin
                           </span>
                         )}
-                        {/* Only main admin can remove co-admins */}
                         {isAdmin && isMemberCoAdmin && !isMainAdmin && (
                           <button
                             onClick={() => removeCoAdmin(memberId)}
@@ -427,7 +423,6 @@ export default function GroupDetail() {
                 </div>
               )}
 
-              {/* Slot counter for admins */}
               {isAnyAdmin && (
                 <p className="text-xs text-muted-foreground text-center mt-3">
                   Co-admins: {coAdminIds.length}/3 slots filled
@@ -604,13 +599,13 @@ export default function GroupDetail() {
         {/* Create Session Modal */}
         {showCreateSession && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-            <Card className="w-full max-w-lg mx-4">
+            <Card className="w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto">
               <CardHeader className="flex flex-row items-center justify-between">
                 <div>
                   <CardTitle>Start Study Session</CardTitle>
                   <p className="text-sm text-muted-foreground mt-1">Upload your study material and set a topic</p>
                 </div>
-                <button onClick={() => setShowCreateSession(false)}>
+                <button onClick={() => { setShowCreateSession(false); setSessionFiles([]); setSessionError('') }}>
                   <X className="w-5 h-5 text-muted-foreground hover:text-foreground" />
                 </button>
               </CardHeader>
@@ -619,6 +614,8 @@ export default function GroupDetail() {
                   {sessionError && (
                     <div className="bg-destructive/10 text-destructive text-sm p-3 rounded-md">{sessionError}</div>
                   )}
+
+                  {/* Topic */}
                   <div className="space-y-2">
                     <Label>Study Topic</Label>
                     <Input
@@ -629,26 +626,68 @@ export default function GroupDetail() {
                     />
                     <p className="text-xs text-muted-foreground">This is what the group will study today</p>
                   </div>
+
+                  {/* ── File Upload ── */}
                   <div className="space-y-2">
-                    <Label>Study Material (PDF)</Label>
+                    <Label>Study Materials (PDF / Word) — up to 10 files</Label>
                     <div className="border-2 border-dashed border-border rounded-xl p-5 text-center">
                       <Upload className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
                       <label className="cursor-pointer">
                         <input
                           type="file"
-                          accept=".pdf"
-                          onChange={(e) => setSessionFile(e.target.files[0])}
+                          accept=".pdf,.docx"
+                          multiple
+                          onClick={(e) => { e.target.value = '' }}
+                          onChange={(e) => {
+                            const picked = Array.from(e.target.files).slice(0, 10)
+                            setSessionFiles(prev => {
+                              const combined = [...prev, ...picked]
+                              const unique = combined.filter(
+                                (f, idx, arr) => arr.findIndex(x => x.name === f.name) === idx
+                              )
+                              return unique.slice(0, 10)
+                            })
+                          }}
                           className="hidden"
                         />
                         <span className="text-sm text-primary hover:underline font-medium">
-                          {sessionFile ? sessionFile.name : 'Click to upload PDF'}
+                          Click to upload PDFs or Word docs
                         </span>
                       </label>
                       <p className="text-xs text-muted-foreground mt-1">
-                        Optional but recommended — AI will use this to generate topics and flashcards
+                        Optional — AI uses these to generate topics and flashcards
                       </p>
                     </div>
+                    {sessionFiles.length > 0 && (
+                      <div className="space-y-1.5 mt-2">
+                        {sessionFiles.map((f, i) => (
+                          <div key={i} className="flex items-center gap-2 bg-secondary/60 rounded-lg px-3 py-2">
+                            <FileText className="w-3.5 h-3.5 text-primary flex-shrink-0" />
+                            <span className="text-xs flex-1 truncate">{f.name}</span>
+                            <button
+                              type="button"
+                              onClick={() => setSessionFiles(prev => prev.filter((_, j) => j !== i))}
+                              className="text-muted-foreground hover:text-destructive"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ))}
+                        <p className="text-xs text-muted-foreground text-right">
+                          {sessionFiles.length}/10 files
+                        </p>
+                      </div>
+                    )}
                   </div>
+
+                  {/* Member limit warning */}
+                  {group.members.length > 21 && (
+                    <div className="bg-destructive/10 text-destructive text-sm p-3 rounded-md flex items-center gap-2">
+                      <X className="w-4 h-4 flex-shrink-0" />
+                      This group has {group.members.length} members — sessions are capped at 21. Remove some members before starting.
+                    </div>
+                  )}
+
                   <div className="bg-secondary/50 rounded-xl p-4">
                     <p className="text-sm font-medium mb-2">What happens when you start:</p>
                     <ul className="text-xs text-muted-foreground space-y-1">
@@ -658,11 +697,21 @@ export default function GroupDetail() {
                       <li>✅ All members are notified to join</li>
                     </ul>
                   </div>
+
                   <div className="flex gap-3 pt-2">
-                    <Button type="button" variant="outline" className="flex-1" onClick={() => setShowCreateSession(false)}>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="flex-1"
+                      onClick={() => { setShowCreateSession(false); setSessionFiles([]); setSessionError('') }}
+                    >
                       Cancel
                     </Button>
-                    <Button type="submit" className="flex-1" disabled={sessionLoading || !sessionTopic.trim()}>
+                    <Button
+                      type="submit"
+                      className="flex-1"
+                      disabled={sessionLoading || !sessionTopic.trim() || group.members.length > 21}
+                    >
                       {sessionLoading ? (
                         <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Creating...</>
                       ) : (

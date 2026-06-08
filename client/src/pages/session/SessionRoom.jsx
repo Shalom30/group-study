@@ -60,6 +60,10 @@ export default function SessionRoom() {
   const messagesEndRef = useRef(null)
   const socketRef = useRef(null)
   const timerRef = useRef(null)
+  const [dmMessages, setDmMessages] = useState([])
+  const [dmInput, setDmInput] = useState('')
+  const [showDmPanel, setShowDmPanel] = useState(false)
+  const [mentionSuggestions, setMentionSuggestions] = useState([])
 
   useEffect(() => {
     const token = localStorage.getItem('token')
@@ -177,6 +181,20 @@ export default function SessionRoom() {
     socket.on('student-ready', ({ userName: who }) => {
       setReadyStudents(prev => prev.includes(who) ? prev : [...prev, who])
       addGeneralSystemMessage(`${who} is ready to end the session ✅`)
+    })
+
+    socket.on('dm-received', ({ from, message, time }) => {
+      if (isAdmin || from === userName) {
+        setDmMessages(prev => [...prev, { from, message, time }])
+        if (!showDmPanel) setShowDmPanel(true)
+      }
+    })
+
+    socket.on('kicked-target', ({ targetName }) => {
+      if (targetName === userName) {
+        const groupPageId = session?.group?._id || session?.group
+        navigate(`/groups/${groupPageId}`)
+      }
     })
 
     socket.on('nudge-received', ({ targetName }) => {
@@ -416,6 +434,35 @@ export default function SessionRoom() {
     addGeneralSystemMessage(`You sent a reminder to ${targetName} 👋`)
   }
 
+  const kickMember = async (targetName) => {
+    await api.post(`/sessions/${id}/kick`, { targetName })
+    socketRef.current?.emit('kick-member', { groupId: id, targetName })
+    addGeneralSystemMessage(`${targetName} was removed from the session.`)
+  }
+  const sendDm = () => {
+    if (!dmInput.trim()) return
+    socketRef.current?.emit('dm-admin', { groupId: id, from: userName, message: dmInput.trim() })
+    setDmInput('')
+  }
+
+  const handleInputChange = (e) => {
+    const val = e.target.value
+    setInput(val)
+    const atIndex = val.lastIndexOf('@')
+    if (atIndex !== -1) {
+      const query = val.slice(atIndex + 1).toLowerCase()
+      const suggestions = onlineMembers.filter(m => m !== userName && m.toLowerCase().startsWith(query))
+      setMentionSuggestions(suggestions)
+    } else {
+      setMentionSuggestions([])
+    }
+  }
+
+  const insertMention = (name) => {
+    const atIndex = input.lastIndexOf('@')
+    setInput(input.slice(0, atIndex) + `@${name} `)
+    setMentionSuggestions([])
+  }
   const raiseHand = () => {
     const newState = !handRaised
     setHandRaised(newState)
@@ -647,6 +694,47 @@ export default function SessionRoom() {
 
           {/* Controls */}
           <div className="p-4 mt-auto">
+            {isAdmin && onlineMembers.filter(m => m !== userName).length > 0 && (
+              <div className="mb-4">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Participants</p>
+                <div className="space-y-1">
+                  {onlineMembers.filter(m => m !== userName).map((member, i) => (
+                    <div key={i} className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-secondary/50">
+                      <div className="w-5 h-5 bg-primary/10 rounded-full flex items-center justify-center flex-shrink-0">
+                        <span className="text-xs font-bold text-primary">{member.charAt(0).toUpperCase()}</span>
+                      </div>
+                      <span className="text-xs flex-1 truncate">{member}</span>
+                      <button onClick={() => kickMember(member)} className="text-xs text-destructive hover:underline flex-shrink-0">
+                        Kick
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {!isAdmin && (
+              <div className="mb-4">
+                <Button
+                  variant="outline" size="sm" className="w-full justify-start"
+                  onClick={() => setShowDmPanel(p => !p)}
+                >
+                  <MessageSquare className="w-4 h-4 mr-2" />
+                  DM Admin {dmMessages.length > 0 && <span className="ml-auto bg-primary text-primary-foreground text-xs rounded-full px-1.5">{dmMessages.length}</span>}
+                </Button>
+              </div>
+            )}
+            {isAdmin && dmMessages.length > 0 && (
+              <div className="mb-4">
+                <Button
+                  variant="outline" size="sm" className="w-full justify-start"
+                  onClick={() => setShowDmPanel(p => !p)}
+                >
+                  <MessageSquare className="w-4 h-4 mr-2" />
+                  DMs <span className="ml-auto bg-primary text-primary-foreground text-xs rounded-full px-1.5">{dmMessages.length}</span>
+                </Button>
+              </div>
+            )}
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Controls</p>
             <div className="space-y-2">
               <Button variant={isSpeaking ? 'default' : 'outline'} size="sm" className="w-full justify-start"
@@ -1172,13 +1260,25 @@ export default function SessionRoom() {
                 <div className="flex items-center gap-2 bg-secondary rounded-xl px-4 py-2">
                   {currentPhase === 1 && <Lock className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />}
                   {currentPhase !== 1 && <MessageSquare className="w-4 h-4 text-muted-foreground flex-shrink-0" />}
-                  <input
-                    className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-                    placeholder={currentPhase === 1 ? 'Message your subgroup (private)...' : 'Type a message...'}
-                    value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
-                  />
+                  <div className="relative flex-1">
+                    {mentionSuggestions.length > 0 && (
+                      <div className="absolute bottom-8 left-0 bg-card border border-border rounded-xl shadow-lg z-10 overflow-hidden">
+                        {mentionSuggestions.map((name, i) => (
+                          <button key={i} onClick={() => insertMention(name)}
+                            className="block w-full text-left px-4 py-2 text-sm hover:bg-secondary">
+                            @{name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    <input
+                      className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                      placeholder={currentPhase === 1 ? 'Message your subgroup (private)...' : 'Type a message or @mention...'}
+                      value={input}
+                      onChange={handleInputChange}
+                      onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
+                    />
+                  </div>
                   <Button size="sm" onClick={sendMessage} disabled={!input.trim()}>
                     <Send className="w-4 h-4" />
                   </Button>
@@ -1191,6 +1291,46 @@ export default function SessionRoom() {
           )}
         </div>
       </div>
+      {/* DM Panel */}
+      {showDmPanel && (
+        <div className="fixed bottom-4 right-4 w-80 bg-card border border-border rounded-2xl shadow-xl z-50 flex flex-col overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+            <p className="text-sm font-semibold">
+              {isAdmin ? 'Student DMs' : 'DM to Admin'}
+            </p>
+            <button onClick={() => setShowDmPanel(false)}>
+              <X className="w-4 h-4 text-muted-foreground" />
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto p-3 space-y-2 max-h-60">
+            {dmMessages.length === 0 && (
+              <p className="text-xs text-muted-foreground text-center py-4">No messages yet</p>
+            )}
+            {dmMessages.map((dm, i) => (
+              <div key={i} className={`flex flex-col ${dm.from === userName ? 'items-end' : 'items-start'}`}>
+                <span className="text-xs text-muted-foreground mb-0.5">{dm.from}</span>
+                <div className={`px-3 py-2 rounded-xl text-sm max-w-[90%] ${dm.from === userName ? 'bg-primary text-primary-foreground' : 'bg-secondary'}`}>
+                  {dm.message}
+                </div>
+              </div>
+            ))}
+          </div>
+          {!isAdmin && (
+            <div className="border-t border-border p-3 flex gap-2">
+              <input
+                className="flex-1 text-sm bg-secondary rounded-lg px-3 py-1.5 outline-none"
+                placeholder="Message admin..."
+                value={dmInput}
+                onChange={(e) => setDmInput(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && sendDm()}
+              />
+              <Button size="sm" onClick={sendDm} disabled={!dmInput.trim()}>
+                <Send className="w-3.5 h-3.5" />
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

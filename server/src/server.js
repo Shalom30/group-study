@@ -127,6 +127,14 @@ io.on('connection', (socket) => {
     io.to(groupId).emit('nudge-received', { targetName })
   })  
 
+  socket.on('kick-member', ({ groupId, targetName }) => {
+    io.to(groupId).emit('kicked-target', { targetName })
+  })
+
+  socket.on('dm-admin', ({ groupId, from, message }) => {
+    io.to(groupId).emit('dm-received', { from, message, time: new Date().toLocaleTimeString() })
+  })
+  
   socket.on('score-submitted', ({ groupId, userName, score }) => {
     io.to(groupId).emit('score-submitted', { userName, score })
   })
