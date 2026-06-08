@@ -37,6 +37,9 @@ export default function GroupDetail() {
   const [bulkLoading, setBulkLoading] = useState(false)
   const [bulkResults, setBulkResults] = useState(null)
   const [inviteTab, setInviteTab] = useState('single')
+  const [coAdminRequesting, setCoAdminRequesting] = useState(false)
+  const [respondingTo, setRespondingTo] = useState(null)
+  const [removingCoAdmin, setRemovingCoAdmin] = useState(null)
 
   useEffect(() => {
     fetchGroup()
@@ -48,6 +51,13 @@ export default function GroupDetail() {
       const payload = JSON.parse(atob(token.split('.')[1]))
       setCurrentUserId(payload.id)
     }
+
+    const interval = setInterval(() => {
+      fetchGroup()
+      fetchActiveSession()
+    }, 5000)
+
+    return () => clearInterval(interval)
   }, [id])
 
   const fetchGroup = async () => {
@@ -81,7 +91,7 @@ export default function GroupDetail() {
       setPastLoading(false)
     }
   }
-  
+
   const sendInvite = async (e) => {
     e.preventDefault()
     setInviteLoading(true)
@@ -105,14 +115,12 @@ export default function GroupDetail() {
     setBulkResults(null)
 
     try {
-      // Read Excel file using SheetJS
       const XLSX = await import('https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs')
       const data = await bulkFile.arrayBuffer()
       const workbook = XLSX.read(data)
       const sheet = workbook.Sheets[workbook.SheetNames[0]]
       const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 })
 
-      // Extract emails from first column, skip header if it says "email"
       const emails = rows
         .map(row => row[0]?.toString().trim())
         .filter(val => val && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val))
@@ -123,7 +131,6 @@ export default function GroupDetail() {
         return
       }
 
-      // Send each invite
       let sent = 0
       let alreadyInvited = 0
       let failed = 0
@@ -173,22 +180,67 @@ export default function GroupDetail() {
     }
   }
 
-    const deleteGroup = async () => {
+  const requestCoAdmin = async () => {
+    setCoAdminRequesting(true)
+    try {
+      await api.post(`/groups/${id}/request-coadmin`)
+      fetchGroup()
+    } catch (err) {
+      console.error(err)
+    } finally {
+      setCoAdminRequesting(false)
+    }
+  }
+
+  const respondToCoAdminRequest = async (userId, action) => {
+    setRespondingTo(userId + action)
+    try {
+      await api.post(`/groups/${id}/coadmin-respond`, { userId, action })
+      fetchGroup()
+    } catch (err) {
+      console.error(err)
+    } finally {
+      setRespondingTo(null)
+    }
+  }
+
+  const removeCoAdmin = async (userId) => {
+    setRemovingCoAdmin(userId)
+    try {
+      await api.post(`/groups/${id}/remove-coadmin`, { userId })
+      fetchGroup()
+    } catch (err) {
+      console.error(err)
+    } finally {
+      setRemovingCoAdmin(null)
+    }
+  }
+
+  const deleteGroup = async () => {
     setDeleteLoading(true)
     try {
-        await api.delete(`/groups/${id}`)
-        navigate('/groups')
+      await api.delete(`/groups/${id}`)
+      navigate('/groups')
     } catch (err) {
-        console.error(err)
+      console.error(err)
     } finally {
-        setDeleteLoading(false)
+      setDeleteLoading(false)
     }
-    }
-    const adminId = group?.admin?._id
-        ? group.admin._id.toString()
-        : group?.admin?.toString() ?? ''
-    const isAdmin = !!adminId && adminId === currentUserId
+  }
 
+  // ── derived admin state ──────────────────────────────────────────────────
+  const adminId = group?.admin?._id
+    ? group.admin._id.toString()
+    : group?.admin?.toString() ?? ''
+  const isAdmin = !!adminId && adminId === currentUserId
+  const coAdminIds = group?.coAdmins?.map(c => (c._id || c).toString()) || []
+  const isCoAdmin = coAdminIds.includes(currentUserId)
+  const isAnyAdmin = isAdmin || isCoAdmin
+  const hasRequestedCoAdmin = group?.coAdminRequests?.some(
+    r => (r.user?._id || r.user)?.toString() === currentUserId
+  )
+
+  // ── loading / not found guards ───────────────────────────────────────────
   if (loading) {
     return (
       <MainLayout>
@@ -226,6 +278,8 @@ export default function GroupDetail() {
   return (
     <MainLayout>
       <div className="max-w-4xl mx-auto">
+
+        {/* Back button */}
         <div className="flex items-center gap-4 mb-8">
           <Button variant="ghost" size="sm" onClick={() => navigate('/groups')}>
             <ArrowLeft className="w-4 h-4 mr-2" />
@@ -233,6 +287,7 @@ export default function GroupDetail() {
           </Button>
         </div>
 
+        {/* Group header */}
         <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 mb-6 md:mb-8">
           <div className="flex items-center gap-3 md:gap-4">
             <div className="w-12 h-12 md:w-16 md:h-16 bg-primary/10 rounded-2xl flex items-center justify-center flex-shrink-0">
@@ -240,9 +295,7 @@ export default function GroupDetail() {
             </div>
             <div>
               <h1 className="text-3xl font-bold">{group.name}</h1>
-              <p className="text-muted-foreground mt-1">
-                {group.description || 'No description'}
-              </p>
+              <p className="text-muted-foreground mt-1">{group.description || 'No description'}</p>
               <p className="text-sm text-muted-foreground mt-1">
                 {group.members.length} member{group.members.length !== 1 ? 's' : ''}
               </p>
@@ -258,7 +311,7 @@ export default function GroupDetail() {
                 <Play className="w-4 h-4 mr-1 md:mr-2" />
                 <span className="hidden sm:inline">Join </span>Session
               </Button>
-            ) : isAdmin ? (
+            ) : isAnyAdmin ? (
               <Button size="sm" onClick={() => setShowCreateSession(true)}>
                 <Play className="w-4 h-4 mr-1 md:mr-2" />
                 <span className="hidden sm:inline">Start </span>Session
@@ -269,6 +322,7 @@ export default function GroupDetail() {
                 <span className="sm:hidden">Waiting...</span>
               </Button>
             )}
+            {/* Delete — main admin only */}
             {isAdmin && (
               <Button variant="destructive" size="sm" onClick={() => setShowDeleteConfirm(true)}>
                 <Trash2 className="w-4 h-4" />
@@ -284,25 +338,19 @@ export default function GroupDetail() {
             <div className="flex items-center gap-3">
               <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse" />
               <div>
-                <p className="font-medium text-green-800">
-                  Active Session: {activeSession.topic}
-                </p>
-                <p className="text-sm text-green-600">
-                  Phase {activeSession.currentPhase + 1} — Click to join
-                </p>
+                <p className="font-medium text-green-800">Active Session: {activeSession.topic}</p>
+                <p className="text-sm text-green-600">Phase {activeSession.currentPhase + 1} — Click to join</p>
               </div>
             </div>
-            <Button
-              size="sm"
-              onClick={() => navigate(`/session/${activeSession._id}`)}
-            >
+            <Button size="sm" onClick={() => navigate(`/session/${activeSession._id}`)}>
               Join Now
             </Button>
           </div>
         )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Members */}
+
+          {/* Members card */}
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -312,73 +360,172 @@ export default function GroupDetail() {
             </CardHeader>
             <CardContent>
               <div className="space-y-3">
-                {group.members.map((member, i) => (
-                  <div
-                    key={i}
-                    className="flex items-center gap-3 p-3 rounded-lg bg-secondary/50"
-                  >
-                    <div className="w-9 h-9 bg-primary/10 rounded-full flex items-center justify-center">
-                      <span className="text-sm font-semibold text-primary">
-                        {member.name ? member.name.charAt(0).toUpperCase() : 'U'}
-                      </span>
+                {group.members.map((member, i) => {
+                  const memberId = (member._id || member).toString()
+                  const isMainAdmin = memberId === adminId
+                  const isMemberCoAdmin = coAdminIds.includes(memberId)
+                  return (
+                    <div key={i} className="flex items-center gap-3 p-3 rounded-lg bg-secondary/50">
+                      <div className="w-9 h-9 bg-primary/10 rounded-full flex items-center justify-center">
+                        <span className="text-sm font-semibold text-primary">
+                          {member.name ? member.name.charAt(0).toUpperCase() : 'U'}
+                        </span>
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-sm font-medium">{member.name || 'Member'}</p>
+                        <p className="text-xs text-muted-foreground">{member.email || ''}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {isMainAdmin && (
+                          <span className="flex items-center gap-1 text-xs bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full font-medium">
+                            <Crown className="w-3 h-3" /> Admin
+                          </span>
+                        )}
+                        {!isMainAdmin && isMemberCoAdmin && (
+                          <span className="flex items-center gap-1 text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">
+                            <Crown className="w-3 h-3" /> Co-Admin
+                          </span>
+                        )}
+                        {/* Only main admin can remove co-admins */}
+                        {isAdmin && isMemberCoAdmin && !isMainAdmin && (
+                          <button
+                            onClick={() => removeCoAdmin(memberId)}
+                            disabled={removingCoAdmin === memberId}
+                            className="text-xs text-destructive hover:underline"
+                          >
+                            {removingCoAdmin === memberId ? '...' : 'Remove'}
+                          </button>
+                        )}
+                      </div>
                     </div>
-                    <div className="flex-1">
-                      <p className="text-sm font-medium">{member.name || 'Member'}</p>
-                      <p className="text-xs text-muted-foreground">{member.email || ''}</p>
-                    </div>
-                    {(group.admin === member._id ||
-                      group.admin?._id === member._id) && (
-                      <Crown className="w-4 h-4 text-yellow-500" />
-                    )}
-                  </div>
-                ))}
+                  )
+                })}
               </div>
+
+              {/* Request Co-Admin — only for regular members */}
+              {!isAdmin && !isCoAdmin && (
+                <div className="mt-4 pt-4 border-t border-border">
+                  {hasRequestedCoAdmin ? (
+                    <p className="text-xs text-center text-muted-foreground bg-secondary rounded-lg py-2">
+                      ✅ Co-admin request sent — waiting for admin approval
+                    </p>
+                  ) : (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-full text-xs"
+                      onClick={requestCoAdmin}
+                      disabled={coAdminRequesting}
+                    >
+                      {coAdminRequesting ? (
+                        <><Loader2 className="w-3 h-3 mr-2 animate-spin" />Sending request...</>
+                      ) : (
+                        <><Crown className="w-3 h-3 mr-2" />Request Co-Admin Role</>
+                      )}
+                    </Button>
+                  )}
+                </div>
+              )}
+
+              {/* Slot counter for admins */}
+              {isAnyAdmin && (
+                <p className="text-xs text-muted-foreground text-center mt-3">
+                  Co-admins: {coAdminIds.length}/3 slots filled
+                </p>
+              )}
             </CardContent>
           </Card>
 
-          {/* Quick Actions */}
+          {/* Quick Actions card */}
           <Card>
             <CardHeader>
               <CardTitle>Quick Actions</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              {isAdmin && !activeSession && (
-                <Button
-                  className="w-full justify-start"
-                  onClick={() => setShowCreateSession(true)}
-                >
+              {isAnyAdmin && !activeSession && (
+                <Button className="w-full justify-start" onClick={() => setShowCreateSession(true)}>
                   <Play className="w-4 h-4 mr-3" />
                   Start New Study Session
                 </Button>
               )}
               {activeSession && (
-                <Button
-                  className="w-full justify-start"
-                  onClick={() => navigate(`/session/${activeSession._id}`)}
-                >
+                <Button className="w-full justify-start" onClick={() => navigate(`/session/${activeSession._id}`)}>
                   <Play className="w-4 h-4 mr-3" />
                   Join Active Session
                 </Button>
               )}
-              <Button
-                variant="outline"
-                className="w-full justify-start"
-                onClick={() => setShowInvite(true)}
-              >
+              <Button variant="outline" className="w-full justify-start" onClick={() => setShowInvite(true)}>
                 <UserPlus className="w-4 h-4 mr-3" />
                 Invite Members
               </Button>
-              <Button
-                variant="outline"
-                className="w-full justify-start"
-                onClick={() => navigate('/documents')}
-              >
+              <Button variant="outline" className="w-full justify-start" onClick={() => navigate('/documents')}>
                 <FileText className="w-4 h-4 mr-3" />
                 Upload Documents
               </Button>
             </CardContent>
           </Card>
         </div>
+
+        {/* Co-Admin Requests — main admin only */}
+        {isAdmin && group.coAdminRequests?.length > 0 && (
+          <div className="mt-6">
+            <div className="flex items-center gap-2 mb-3">
+              <Crown className="w-5 h-5 text-yellow-500" />
+              <h2 className="text-lg font-semibold">Co-Admin Requests</h2>
+              <span className="text-xs bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full font-medium">
+                {group.coAdminRequests.length} pending
+              </span>
+            </div>
+            <div className="space-y-2">
+              {group.coAdminRequests.map((req, i) => {
+                const reqUser = group.members.find(
+                  m => (m._id || m).toString() === (req.user?._id || req.user)?.toString()
+                )
+                const reqUserId = (req.user?._id || req.user)?.toString()
+                return (
+                  <div key={i} className="flex items-center gap-3 p-3 rounded-xl border border-border bg-card">
+                    <div className="w-9 h-9 bg-primary/10 rounded-full flex items-center justify-center flex-shrink-0">
+                      <span className="text-sm font-semibold text-primary">
+                        {reqUser?.name?.charAt(0).toUpperCase() || '?'}
+                      </span>
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-sm font-medium">{reqUser?.name || 'Member'}</p>
+                      <p className="text-xs text-muted-foreground">Requesting co-admin access</p>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        disabled={respondingTo === reqUserId + 'approve' || coAdminIds.length >= 3}
+                        onClick={() => respondToCoAdminRequest(reqUserId, 'approve')}
+                      >
+                        {respondingTo === reqUserId + 'approve'
+                          ? <Loader2 className="w-3 h-3 animate-spin" />
+                          : coAdminIds.length >= 3 ? 'Full' : 'Approve'}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={respondingTo === reqUserId + 'reject'}
+                        onClick={() => respondToCoAdminRequest(reqUserId, 'reject')}
+                      >
+                        {respondingTo === reqUserId + 'reject'
+                          ? <Loader2 className="w-3 h-3 animate-spin" />
+                          : 'Reject'}
+                      </Button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+            {coAdminIds.length >= 3 && (
+              <p className="text-xs text-muted-foreground mt-2 text-center">
+                All 3 co-admin slots are filled. Remove one to approve new requests.
+              </p>
+            )}
+          </div>
+        )}
+
         {/* Past Sessions */}
         <div className="mt-8">
           <div className="flex items-center gap-2 mb-4">
@@ -394,9 +541,7 @@ export default function GroupDetail() {
             <div className="text-center py-10 border border-dashed border-border rounded-xl">
               <History className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
               <p className="text-sm text-muted-foreground">No past sessions yet.</p>
-              <p className="text-xs text-muted-foreground mt-1">
-                Completed sessions will appear here.
-              </p>
+              <p className="text-xs text-muted-foreground mt-1">Completed sessions will appear here.</p>
             </div>
           ) : (
             <div className="space-y-3">
@@ -424,7 +569,6 @@ export default function GroupDetail() {
                         </span>
                       </div>
                     </div>
-                    {/* Mobile score — shows only on small screens */}
                     <div className="sm:hidden flex-shrink-0">
                       {avgScore !== null ? (
                         <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${avgScore >= 70 ? 'bg-green-100 text-green-700' : avgScore >= 40 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'}`}>
@@ -442,9 +586,7 @@ export default function GroupDetail() {
                         </div>
                       )}
                       {avgScore === null && (
-                        <span className="text-xs text-muted-foreground bg-secondary px-3 py-1 rounded-full">
-                          No scores
-                        </span>
+                        <span className="text-xs text-muted-foreground bg-secondary px-3 py-1 rounded-full">No scores</span>
                       )}
                       <span className="text-xs bg-secondary text-muted-foreground px-2 py-1 rounded-full">
                         Phase {s.currentPhase + 1} reached
@@ -457,6 +599,8 @@ export default function GroupDetail() {
           )}
         </div>
 
+        {/* ── MODALS ─────────────────────────────────────────────────────── */}
+
         {/* Create Session Modal */}
         {showCreateSession && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
@@ -464,9 +608,7 @@ export default function GroupDetail() {
               <CardHeader className="flex flex-row items-center justify-between">
                 <div>
                   <CardTitle>Start Study Session</CardTitle>
-                  <p className="text-sm text-muted-foreground mt-1">
-                    Upload your study material and set a topic
-                  </p>
+                  <p className="text-sm text-muted-foreground mt-1">Upload your study material and set a topic</p>
                 </div>
                 <button onClick={() => setShowCreateSession(false)}>
                   <X className="w-5 h-5 text-muted-foreground hover:text-foreground" />
@@ -475,11 +617,8 @@ export default function GroupDetail() {
               <CardContent>
                 <form onSubmit={createSession} className="space-y-5">
                   {sessionError && (
-                    <div className="bg-destructive/10 text-destructive text-sm p-3 rounded-md">
-                      {sessionError}
-                    </div>
+                    <div className="bg-destructive/10 text-destructive text-sm p-3 rounded-md">{sessionError}</div>
                   )}
-
                   <div className="space-y-2">
                     <Label>Study Topic</Label>
                     <Input
@@ -488,11 +627,8 @@ export default function GroupDetail() {
                       onChange={(e) => setSessionTopic(e.target.value)}
                       required
                     />
-                    <p className="text-xs text-muted-foreground">
-                      This is what the group will study today
-                    </p>
+                    <p className="text-xs text-muted-foreground">This is what the group will study today</p>
                   </div>
-
                   <div className="space-y-2">
                     <Label>Study Material (PDF)</Label>
                     <div className="border-2 border-dashed border-border rounded-xl p-5 text-center">
@@ -509,16 +645,12 @@ export default function GroupDetail() {
                         </span>
                       </label>
                       <p className="text-xs text-muted-foreground mt-1">
-                        Optional but recommended — AI will use this to generate
-                        topics and flashcards
+                        Optional but recommended — AI will use this to generate topics and flashcards
                       </p>
                     </div>
                   </div>
-
                   <div className="bg-secondary/50 rounded-xl p-4">
-                    <p className="text-sm font-medium mb-2">
-                      What happens when you start:
-                    </p>
+                    <p className="text-sm font-medium mb-2">What happens when you start:</p>
                     <ul className="text-xs text-muted-foreground space-y-1">
                       <li>✅ Members are divided into subgroups of max 3</li>
                       <li>✅ Topics are distributed across subgroups</li>
@@ -526,31 +658,15 @@ export default function GroupDetail() {
                       <li>✅ All members are notified to join</li>
                     </ul>
                   </div>
-
                   <div className="flex gap-3 pt-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="flex-1"
-                      onClick={() => setShowCreateSession(false)}
-                    >
+                    <Button type="button" variant="outline" className="flex-1" onClick={() => setShowCreateSession(false)}>
                       Cancel
                     </Button>
-                    <Button
-                      type="submit"
-                      className="flex-1"
-                      disabled={sessionLoading || !sessionTopic.trim()}
-                    >
+                    <Button type="submit" className="flex-1" disabled={sessionLoading || !sessionTopic.trim()}>
                       {sessionLoading ? (
-                        <>
-                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                          Creating...
-                        </>
+                        <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Creating...</>
                       ) : (
-                        <>
-                          <Play className="w-4 h-4 mr-2" />
-                          Start Session
-                        </>
+                        <><Play className="w-4 h-4 mr-2" />Start Session</>
                       )}
                     </Button>
                   </div>
@@ -570,16 +686,13 @@ export default function GroupDetail() {
               <CardContent className="space-y-4">
                 <p className="text-sm text-muted-foreground">
                   Are you sure you want to delete <strong>{group.name}</strong>?
-                  This will permanently remove the group and all its invitations.
-                  This action cannot be undone.
+                  This will permanently remove the group and all its invitations. This action cannot be undone.
                 </p>
                 <div className="flex gap-3">
-                  <Button variant="outline" className="flex-1"
-                    onClick={() => setShowDeleteConfirm(false)} disabled={deleteLoading}>
+                  <Button variant="outline" className="flex-1" onClick={() => setShowDeleteConfirm(false)} disabled={deleteLoading}>
                     Cancel
                   </Button>
-                  <Button variant="destructive" className="flex-1"
-                    onClick={deleteGroup} disabled={deleteLoading}>
+                  <Button variant="destructive" className="flex-1" onClick={deleteGroup} disabled={deleteLoading}>
                     {deleteLoading
                       ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Deleting...</>
                       : 'Yes, Delete Group'}
@@ -589,7 +702,6 @@ export default function GroupDetail() {
             </Card>
           </div>
         )}
-
 
         {/* Invite Modal */}
         {showInvite && (
@@ -609,42 +721,28 @@ export default function GroupDetail() {
                 </button>
               </CardHeader>
               <CardContent>
-                {/* Tabs */}
                 <div className="flex gap-1 bg-secondary rounded-xl p-1 mb-5">
                   <button
                     onClick={() => setInviteTab('single')}
-                    className={`flex-1 text-sm py-2 rounded-lg font-medium transition-all ${
-                      inviteTab === 'single'
-                        ? 'bg-white text-foreground shadow-sm'
-                        : 'text-muted-foreground hover:text-foreground'
-                    }`}
+                    className={`flex-1 text-sm py-2 rounded-lg font-medium transition-all ${inviteTab === 'single' ? 'bg-white text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
                   >
                     Single Invite
                   </button>
                   <button
                     onClick={() => setInviteTab('bulk')}
-                    className={`flex-1 text-sm py-2 rounded-lg font-medium transition-all ${
-                      inviteTab === 'bulk'
-                        ? 'bg-white text-foreground shadow-sm'
-                        : 'text-muted-foreground hover:text-foreground'
-                    }`}
+                    className={`flex-1 text-sm py-2 rounded-lg font-medium transition-all ${inviteTab === 'bulk' ? 'bg-white text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
                   >
                     Bulk Invite (Excel)
                   </button>
                 </div>
 
-                {/* Single Invite Tab */}
                 {inviteTab === 'single' && (
                   <form onSubmit={sendInvite} className="space-y-4">
                     {inviteError && (
-                      <div className="bg-destructive/10 text-destructive text-sm p-3 rounded-md">
-                        {inviteError}
-                      </div>
+                      <div className="bg-destructive/10 text-destructive text-sm p-3 rounded-md">{inviteError}</div>
                     )}
                     {inviteSuccess && (
-                      <div className="bg-green-50 text-green-700 text-sm p-3 rounded-md">
-                        ✅ {inviteSuccess}
-                      </div>
+                      <div className="bg-green-50 text-green-700 text-sm p-3 rounded-md">✅ {inviteSuccess}</div>
                     )}
                     <div className="space-y-2">
                       <Label>Email Address</Label>
@@ -662,15 +760,12 @@ export default function GroupDetail() {
                         Close
                       </Button>
                       <Button type="submit" className="flex-1" disabled={inviteLoading}>
-                        {inviteLoading ? (
-                          <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Sending...</>
-                        ) : 'Send Invite'}
+                        {inviteLoading ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Sending...</> : 'Send Invite'}
                       </Button>
                     </div>
                   </form>
                 )}
 
-                {/* Bulk Invite Tab */}
                 {inviteTab === 'bulk' && (
                   <form onSubmit={sendBulkInvite} className="space-y-4">
                     <div className="bg-secondary/50 rounded-xl p-4 text-sm text-muted-foreground space-y-1">
@@ -680,31 +775,21 @@ export default function GroupDetail() {
                       <p>• You can have a header like "Email" in row 1 — it will be skipped</p>
                       <p>• Save as <strong>.xlsx</strong> format</p>
                     </div>
-
                     <div className="border-2 border-dashed border-border rounded-xl p-6 text-center">
                       <Upload className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
                       <label className="cursor-pointer">
                         <input
                           type="file"
                           accept=".xlsx,.xls"
-                          onChange={(e) => {
-                            setBulkFile(e.target.files[0])
-                            setBulkResults(null)
-                          }}
+                          onChange={(e) => { setBulkFile(e.target.files[0]); setBulkResults(null) }}
                           className="hidden"
                         />
                         <span className="text-sm text-primary hover:underline font-medium">
                           {bulkFile ? bulkFile.name : 'Click to upload Excel file'}
                         </span>
                       </label>
-                      {bulkFile && (
-                        <p className="text-xs text-muted-foreground mt-1">
-                          Ready to send invitations
-                        </p>
-                      )}
+                      {bulkFile && <p className="text-xs text-muted-foreground mt-1">Ready to send invitations</p>}
                     </div>
-
-                    {/* Results */}
                     {bulkResults && !bulkResults.error && (
                       <div className="bg-green-50 border border-green-200 rounded-xl p-4 space-y-1">
                         <p className="text-sm font-semibold text-green-800">
@@ -714,34 +799,23 @@ export default function GroupDetail() {
                           {bulkResults.sent} invitation{bulkResults.sent !== 1 ? 's' : ''} sent successfully
                         </p>
                         {bulkResults.alreadyInvited > 0 && (
-                          <p className="text-xs text-yellow-700">
-                            {bulkResults.alreadyInvited} already invited or member
-                          </p>
+                          <p className="text-xs text-yellow-700">{bulkResults.alreadyInvited} already invited or member</p>
                         )}
                         {bulkResults.failed > 0 && (
-                          <p className="text-xs text-red-600">
-                            {bulkResults.failed} failed to send
-                          </p>
+                          <p className="text-xs text-red-600">{bulkResults.failed} failed to send</p>
                         )}
                       </div>
                     )}
-
                     {bulkResults?.error && (
-                      <div className="bg-destructive/10 text-destructive text-sm p-3 rounded-md">
-                        {bulkResults.error}
-                      </div>
+                      <div className="bg-destructive/10 text-destructive text-sm p-3 rounded-md">{bulkResults.error}</div>
                     )}
-
                     <div className="flex gap-3">
                       <Button type="button" variant="outline" className="flex-1"
                         onClick={() => { setShowInvite(false); setBulkResults(null); setBulkFile(null) }}>
                         Close
                       </Button>
-                      <Button type="submit" className="flex-1"
-                        disabled={bulkLoading || !bulkFile}>
-                        {bulkLoading ? (
-                          <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Sending all...</>
-                        ) : 'Send All Invites'}
+                      <Button type="submit" className="flex-1" disabled={bulkLoading || !bulkFile}>
+                        {bulkLoading ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Sending all...</> : 'Send All Invites'}
                       </Button>
                     </div>
                   </form>
@@ -750,6 +824,7 @@ export default function GroupDetail() {
             </Card>
           </div>
         )}
+
       </div>
     </MainLayout>
   )
