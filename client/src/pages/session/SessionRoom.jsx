@@ -207,11 +207,11 @@ export default function SessionRoom() {
 
     socket.on('dm-received', ({ from, message, time }) => {
       setDmMessages(prev => [...prev, { from, message, time }])
-      if (!showDmPanel && from !== userName) {
+      if (from !== userName && !showDmPanel) {
         setDmUnread(n => n + 1)
+        setShowDmPanel(true)
       }
     })
-
     socket.on('kicked-target', ({ targetName }) => {
       if (targetName === userName) {
         const groupPageId = session?.group?._id || session?.group
@@ -464,7 +464,6 @@ export default function SessionRoom() {
   const sendDm = () => {
     if (!dmInput.trim()) return
     socketRef.current?.emit('dm-admin', { groupId: id, from: userName, message: dmInput.trim() })
-    setDmMessages(prev => [...prev, { from: userName, message: dmInput.trim(), time: new Date().toLocaleTimeString() }])
     setDmInput('')
   }
 
@@ -776,10 +775,10 @@ export default function SessionRoom() {
               <div className="mb-4">
                 <Button
                   variant="outline" size="sm" className="w-full justify-start"
-                  onClick={() => setShowDmPanel(p => !p)}
+                  onClick={() => { setShowDmPanel(p => !p); setDmUnread(0) }}
                 >
                   <MessageSquare className="w-4 h-4 mr-2" />
-                  DM Admin {dmMessages.length > 0 && <span className="ml-auto bg-primary text-primary-foreground text-xs rounded-full px-1.5">{dmMessages.length}</span>}
+                  DM Admin {dmUnread > 0 && <span className="ml-auto bg-primary text-primary-foreground text-xs rounded-full px-1.5">{dmUnread}</span>}
                 </Button>
               </div>
             )}
@@ -834,7 +833,7 @@ export default function SessionRoom() {
         <div className="flex-1 flex flex-col overflow-hidden">
 
           {/* Phase banner */}
-          <div className={`px-6 py-3 border-b ${phase.border} ${phase.bg} flex items-center justify-between`}>
+          <div className={`px-3 md:px-6 py-2 md:py-3 border-b ${phase.border} ${phase.bg} flex flex-col sm:flex-row items-start sm:items-center gap-1 sm:gap-0 justify-between`}>
             <div className="flex items-center gap-3">
               {(() => { const Icon = phase.icon; return <Icon className={`w-5 h-5 ${phase.color}`} /> })()}
               <div>
@@ -842,7 +841,7 @@ export default function SessionRoom() {
                 <p className="text-xs text-muted-foreground">{phase.description}</p>
               </div>
             </div>
-            <div className="text-xs text-muted-foreground bg-white/60 px-3 py-1 rounded-full">
+            <div className="text-xs text-muted-foreground bg-white/60 px-2 py-1 rounded-full truncate max-w-[180px] sm:max-w-none hidden sm:block">
               {currentPhase === 0 && <>Introduce yourself — topic: <strong>{session.topic}</strong></>}
               {currentPhase === 1 && mySubGroup && <>🔒 Private room — Teach: {mySubGroup.topics?.join(', ')}</>}
               {currentPhase === 2 && <>Share your subgroup's findings with everyone</>}
@@ -973,9 +972,9 @@ export default function SessionRoom() {
               </div>
 
               {/* Input — only presenting subgroup or if all done */}
-              <div className="border-t border-border p-4">
+              <div className="border-t border-border p-3 md:p-4">
                 {mySubGroupIndex === presentingSubgroupIndex || allDebriefDone ? (
-                  <div className="flex items-center gap-2 bg-secondary rounded-xl px-4 py-2">
+                  <div className="flex items-center gap-2 bg-secondary rounded-xl px-3 md:px-4 py-2.5 md:py-2">
                     {/* <Mic className="w-4 h-4 text-purple-500 flex-shrink-0" /> */}
                     <input
                       className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
@@ -1307,6 +1306,19 @@ export default function SessionRoom() {
                         </div>
                       </div>
                     )}
+                    {msg.type === 'user' && (
+                      <div className={`flex ${msg.sender === userName ? 'justify-end' : 'justify-start'}`}>
+                        <div className="max-w-md">
+                          {msg.sender !== userName && (
+                            <p className="text-xs font-medium text-muted-foreground mb-1 ml-1">{msg.sender}</p>
+                          )}
+                          <div className={`rounded-2xl px-4 py-2.5 text-sm ${msg.sender === userName ? 'bg-primary text-primary-foreground rounded-tr-sm' : 'bg-secondary rounded-tl-sm'}`}>
+                            {msg.text}
+                          </div>
+                          <p className={`text-xs text-muted-foreground mt-1 ${msg.sender === userName ? 'text-right' : ''}`}>{msg.time}</p>
+                        </div>
+                      </div>
+                    )}
                     {msg.type === 'ai' && (
                       <div className="flex gap-3">
                         <div className="w-8 h-8 bg-purple-100 rounded-full flex items-center justify-center flex-shrink-0">
@@ -1372,7 +1384,7 @@ export default function SessionRoom() {
       </div>
       {/* DM Panel */}
       {showDmPanel && (
-        <div className="fixed bottom-4 right-4 w-80 bg-card border border-border rounded-2xl shadow-xl z-50 flex flex-col overflow-hidden">
+        <div className="fixed bottom-0 right-0 sm:bottom-4 sm:right-4 w-full sm:w-80 bg-card border border-border sm:rounded-2xl shadow-xl z-50 flex flex-col overflow-hidden">
           <div className="flex items-center justify-between px-4 py-3 border-b border-border">
             <p className="text-sm font-semibold">
               {isAdmin ? 'Student DMs' : 'DM to Admin'}
@@ -1410,11 +1422,16 @@ export default function SessionRoom() {
       )}
       {/* Voice Room — full main area overlay */}
       {showVoiceRoom && (
-        <div className="fixed z-30 flex" style={{ top: '53px', left: '256px', right: 0, bottom: 0 }}>
+        <div className="fixed z-40 flex" style={{ top: 0, left: 0, right: 0, bottom: 0 }}>
+          <div className="hidden md:block flex-shrink-0" style={{ width: '256px' }} />
           {/* Voice/screen area */}
-          <div className={`flex flex-col bg-background border-r border-border transition-all duration-300 ${showChatOverlay ? 'w-[60%]' : 'w-full'} p-4`}>
+          <div className={`flex flex-col bg-background transition-all duration-300 
+            ${showChatOverlay ? 'hidden md:flex md:w-[60%]' : 'w-full'} p-4`}>
             <div className="flex items-center justify-between mb-3 flex-shrink-0">
               <div className="flex items-center gap-2">
+                <button className="md:hidden p-1 rounded-lg hover:bg-secondary mr-2" onClick={() => setSidebarOpen(true)}>
+                  <Menu className="w-4 h-4" />
+                </button>
                 <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
                 <p className="text-sm font-semibold">Live Call</p>
               </div>
@@ -1434,7 +1451,7 @@ export default function SessionRoom() {
 
           {/* Slide-in chat panel */}
           {showChatOverlay && (
-            <div className="w-[40%] flex flex-col bg-card border-l border-border">
+            <div className="w-full md:w-[40%] flex flex-col bg-card border-l border-border">
               <div className="px-4 py-3 border-b border-border flex items-center justify-between">
                 <p className="text-sm font-semibold">Chat</p>
                 <button onClick={() => setShowChatOverlay(false)}>
