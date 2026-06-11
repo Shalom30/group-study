@@ -18,29 +18,31 @@ export default function Documents() {
   }
 
   const handleUpload = async () => {
-    if (!file) return
-    setLoading(true)
-    setError('')
-    setResult(null)
-    try {
-      const formData = new FormData()
-      formData.append('file', file)
-      const res = await fetch('http://localhost:8000/api/upload', {
-        method: 'POST',
-        body: formData,
-      })
-      const data = await res.json()
-      if (data.error) {
-        setError(data.error)
-      } else {
-        setResult(data)
-      }
-    } catch (err) {
-      setError('AI service is not running. Please start the AI service.')
-    } finally {
-      setLoading(false)
+  if (!file) return
+  setLoading(true)
+  setError('')
+  setResult(null)
+  try {
+    const formData = new FormData()
+    formData.append('file', file)
+    const token = localStorage.getItem('token')
+    const res = await fetch('http://localhost:5000/api/sessions/ai/document', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}` },
+      body: formData,
+    })
+    const data = await res.json()
+    if (!res.ok) {
+      setError(data.message || 'Something went wrong')
+    } else {
+      setResult(data)
     }
+  } catch (err) {
+    setError('Could not connect to server.')
+  } finally {
+    setLoading(false)
   }
+}
 
   return (
     <MainLayout>

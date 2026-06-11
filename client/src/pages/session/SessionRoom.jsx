@@ -1109,24 +1109,7 @@ export default function SessionRoom() {
               <div className="max-w-2xl mx-auto space-y-5">
 
                 {/* AI Summary placeholder */}
-                <Card className="bg-primary/5 border-primary/20">
-                  <CardContent className="p-5">
-                    <div className="flex items-center gap-3 mb-3">
-                      <div className="w-8 h-8 bg-primary/10 rounded-full flex items-center justify-center">
-                        <Brain className="w-4 h-4 text-primary" />
-                      </div>
-                      <div>
-                        <p className="font-semibold text-sm">AI Session Summary</p>
-                        <p className="text-xs text-muted-foreground">Powered by Groq — coming soon</p>
-                      </div>
-                    </div>
-                    <p className="text-sm text-muted-foreground leading-relaxed">
-                      Great session on <strong>{session.topic}</strong>! When your Groq API key is connected,
-                      a full AI-generated summary based on your uploaded documents will appear here —
-                      including key takeaways, common mistakes, and topic breakdowns per subgroup.
-                    </p>
-                  </CardContent>
-                </Card>
+                <AiSummaryCard sessionId={id} generalMessages={generalMessages} />
 
                 {/* Personal performance card */}
                 {score !== null && (
@@ -1500,5 +1483,125 @@ export default function SessionRoom() {
         </div>
       )}
     </div>
+  )
+}
+function AiSummaryCard({ sessionId, generalMessages }) {
+  const [aiData, setAiData] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [generated, setGenerated] = useState(false)
+
+  const generate = async () => {
+    setLoading(true)
+    setError('')
+    try {
+      const token = localStorage.getItem('token')
+      const chatMessages = generalMessages
+        .filter(m => m.type === 'user')
+        .map(m => ({ sender: m.sender, text: m.text }))
+
+      const res = await fetch(`http://localhost:5000/api/sessions/${sessionId}/ai-summary`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ chatMessages })
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.message)
+      setAiData(data)
+      setGenerated(true)
+    } catch (err) {
+      setError(err.message || 'Failed to generate summary')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <Card className="bg-primary/5 border-primary/20">
+      <CardContent className="p-5">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 bg-primary/10 rounded-full flex items-center justify-center">
+              <Brain className="w-4 h-4 text-primary" />
+            </div>
+            <div>
+              <p className="font-semibold text-sm">AI Session Summary</p>
+              <p className="text-xs text-muted-foreground">Powered by Claude</p>
+            </div>
+          </div>
+          {!generated && (
+            <Button size="sm" onClick={generate} disabled={loading}>
+              {loading
+                ? <><Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />Generating...</>
+                : <><Brain className="w-3.5 h-3.5 mr-1.5" />Generate</>}
+            </Button>
+          )}
+        </div>
+
+        {error && <p className="text-xs text-destructive mb-2">{error}</p>}
+
+        {!aiData && !loading && (
+          <p className="text-sm text-muted-foreground">Click Generate to get an AI-powered summary of this session including highlights, subgroup breakdown, and recommendations.</p>
+        )}
+
+        {loading && (
+          <div className="flex items-center gap-2 py-4 justify-center">
+            <Loader2 className="w-5 h-5 animate-spin text-primary" />
+            <p className="text-sm text-muted-foreground">Analysing your session...</p>
+          </div>
+        )}
+
+        {aiData && (
+          <div className="space-y-4">
+            <div>
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Summary</p>
+              <p className="text-sm leading-relaxed">{aiData.summary}</p>
+            </div>
+            {aiData.highlights?.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Key Highlights</p>
+                <ul className="space-y-1">
+                  {aiData.highlights.map((h, i) => (
+                    <li key={i} className="text-sm flex items-start gap-2">
+                      <span className="text-primary mt-0.5">•</span>{h}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {aiData.subgroupBreakdown?.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Subgroup Breakdown</p>
+                <div className="space-y-2">
+                  {aiData.subgroupBreakdown.map((sg, i) => (
+                    <div key={i} className="bg-white/60 rounded-lg p-3">
+                      <div className="flex items-center justify-between mb-1">
+                        <p className="text-xs font-semibold">{sg.name}</p>
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                          sg.performance === 'good' ? 'bg-green-100 text-green-700' :
+                          sg.performance === 'average' ? 'bg-yellow-100 text-yellow-700' :
+                          'bg-red-100 text-red-700'}`}>
+                          {sg.performance}
+                        </span>
+                      </div>
+                      <p className="text-xs text-muted-foreground">{sg.covered}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {aiData.recommendations && (
+              <div className="bg-blue-50 border border-blue-100 rounded-lg p-3">
+                <p className="text-xs font-semibold text-blue-700 mb-1">What to Review Next</p>
+                <p className="text-xs text-blue-700">{aiData.recommendations}</p>
+              </div>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   )
 }

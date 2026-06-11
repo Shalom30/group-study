@@ -7,6 +7,8 @@ const Group = require('../models/Group')
 
 const storage = multer.memoryStorage()
 const upload = multer({ storage, limits: { fileSize: 10 * 1024 * 1024 } })
+const Anthropic = require('@anthropic-ai/sdk')
+const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
 // CREATE SESSION
 router.post('/create', authMiddleware, upload.array('documents', 10), async (req, res) => {
@@ -285,4 +287,228 @@ router.get('/:sessionId/livekit-token', authMiddleware, async (req, res) => {
     res.status(500).json({ message: err.message })
   }
 })
+
+// AI - DOCUMENT SUMMARY + FLASHCARDS
+router.post('/ai/document', authMiddleware, upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ message: 'No file uploaded' })
+
+    let text = ''
+    if (req.file.mimetype === 'application/pdf' || req.file.originalname.endsWith('.pdf')) {
+      const pdfParse = require('pdf-parse')
+      const parsed = await pdfParse(req.file.buffer)
+      text = parsed.text
+    } else if (req.file.originalname.endsWith('.docx')) {
+      const mammoth = require('mammoth')
+      const result = await mammoth.extractRawText({ buffer: req.file.buffer })
+      text = result.value
+    }
+
+    if (!text || text.trim().length < 50)
+      return res.status(400).json({ message: 'Could not extract text from this file.' })
+
+    // Truncate to avoid token limits
+    const truncated = text.slice(0, 12000)
+
+    const message = await anthropic.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 1500,
+      messages: [{
+        role: 'user',
+        content: `You are a study assistant. Given the following document text, do two things:
+
+1. Write a clear, concise summary (150-200 words) of the key concepts.
+2. Generate exactly 8 flashcards as a JSON array with "question" and "answer" fields.
+
+Respond ONLY in this JSON format, nothing else:
+{
+  "summary": "...",
+  "flashcards": [
+    { "question": "...", "answer": "..." }
+  ]
+}
+
+Document:
+${truncated}`
+      }]
+    })
+
+    const raw = message.content[0].text
+    const clean = raw.replace(/```json|```/g, '').trim()
+    const parsed = JSON.parse(clean)
+    res.json(parsed)
+  } catch (err) {
+    console.error('AI document error:', err)
+    res.status(500).json({ message: 'AI processing failed. ' + err.message })
+  }
+})
+
+// AI - SESSION SUMMARY + SUBGROUP BREAKDOWN
+router.post('/:sessionId/ai-summary', authMiddleware, async (req, res) => {
+  try {
+    const session = await Session.findById(req.params.sessionId)
+      .populate('subGroups.members', 'name')
+      .populate('scores')
+    if (!session) return res.status(404).json({ message: 'Session not found' })
+
+    const { chatMessages = [] } = req.body
+
+    // Build subgroup info
+    const subgroupInfo = session.subGroups.map(sg => ({
+      name: sg.name,
+      members: sg.members.map(m => m.name),
+      topics: sg.topics
+    }))
+
+    // Build scores info
+    const scoresInfo = session.scores.map(s =>
+      `${s.userName}: ${s.score}/${s.totalCount} correct`
+    ).join('\n')
+
+    // Sample of chat messages
+    const chatSample = chatMessages.slice(-40).map(m =>
+      `${m.sender}: ${m.text}`
+    ).join('\n')
+
+    const message = await anthropic.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 1500,
+      messages: [{
+        role: 'user',
+        content: `You are a study session analyst. Analyze this collaborative study session and respond ONLY in this JSON format, nothing else:
+{
+  "summary": "2-3 sentence overall session summary",
+  "highlights": ["key point 1", "key point 2", "key point 3"],
+  "subgroupBreakdown": [
+    { "name": "Group 1", "covered": "what they covered", "performance": "good/average/needs improvement" }
+  ],
+  "recommendations": "1-2 sentences on what to review next"
+}
+
+Session topic: ${session.topic}
+Subgroups: ${JSON.stringify(subgroupInfo)}
+Quiz scores:\n${scoresInfo || 'No scores yet'}
+Chat sample:\n${chatSample || 'No chat messages'}`
+      }]
+    })
+
+    const raw = message.content[0].text
+    const clean = raw.replace(/```json|```/g, '').trim()
+    const parsed = JSON.parse(clean)
+    res.json(parsed)
+  } catch (err) {
+    console.error('AI summary error:', err)
+    res.status(500).json({ message: 'AI summary failed. ' + err.message })
+  }
+})
+
+
+// AI - DOCUMENT SUMMARY + FLASHCARDS
+router.post('/ai/document', authMiddleware, upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ message: 'No file uploaded' })
+
+    let text = ''
+    if (req.file.mimetype === 'application/pdf' || req.file.originalname.endsWith('.pdf')) {
+      const pdfParse = require('pdf-parse')
+      const parsed = await pdfParse(req.file.buffer)
+      text = parsed.text
+    } else if (req.file.originalname.endsWith('.docx')) {
+      const mammoth = require('mammoth')
+      const result = await mammoth.extractRawText({ buffer: req.file.buffer })
+      text = result.value
+    }
+
+    if (!text || text.trim().length < 50)
+      return res.status(400).json({ message: 'Could not extract enough text from this file.' })
+
+    const truncated = text.slice(0, 12000)
+
+    const message = await anthropic.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 1500,
+      messages: [{
+        role: 'user',
+        content: `You are a study assistant. Given the following document, do two things:
+1. Write a clear concise summary (150-200 words) of the key concepts.
+2. Generate exactly 8 flashcards as a JSON array with "question" and "answer" fields.
+
+Respond ONLY in this exact JSON format, no extra text:
+{
+  "summary": "...",
+  "flashcards": [
+    { "question": "...", "answer": "..." }
+  ]
+}
+
+Document:
+${truncated}`
+      }]
+    })
+
+    const raw = message.content[0].text
+    const clean = raw.replace(/```json|```/g, '').trim()
+    const parsed = JSON.parse(clean)
+    res.json(parsed)
+  } catch (err) {
+    console.error('AI document error:', err)
+    res.status(500).json({ message: 'AI processing failed: ' + err.message })
+  }
+})
+
+// AI - SESSION SUMMARY + SUBGROUP BREAKDOWN
+router.post('/:sessionId/ai-summary', authMiddleware, async (req, res) => {
+  try {
+    const session = await Session.findById(req.params.sessionId)
+      .populate('subGroups.members', 'name')
+    if (!session) return res.status(404).json({ message: 'Session not found' })
+
+    const { chatMessages = [] } = req.body
+
+    const subgroupInfo = session.subGroups.map(sg => ({
+      name: sg.name,
+      members: sg.members.map(m => m.name),
+      topics: sg.topics
+    }))
+
+    const scoresInfo = (session.scores || []).map(s =>
+      `${s.userName}: ${s.score}/${s.totalCount} correct`
+    ).join('\n') || 'No scores submitted'
+
+    const chatSample = chatMessages.slice(-40)
+      .map(m => `${m.sender}: ${m.text}`)
+      .join('\n') || 'No chat messages'
+
+    const message = await anthropic.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 1500,
+      messages: [{
+        role: 'user',
+        content: `You are a study session analyst. Analyze this session and respond ONLY in this exact JSON format, no extra text:
+{
+  "summary": "2-3 sentence overall session summary",
+  "highlights": ["key point 1", "key point 2", "key point 3"],
+  "subgroupBreakdown": [
+    { "name": "Group 1", "covered": "what they covered", "performance": "good/average/needs improvement" }
+  ],
+  "recommendations": "1-2 sentences on what students should review next"
+}
+
+Topic: ${session.topic}
+Subgroups: ${JSON.stringify(subgroupInfo)}
+Quiz scores: ${scoresInfo}
+Chat sample: ${chatSample}`
+      }]
+    })
+
+    const raw = message.content[0].text
+    const clean = raw.replace(/```json|```/g, '').trim()
+    const parsed = JSON.parse(clean)
+    res.json(parsed)
+  } catch (err) {
+    console.error('AI summary error:', err)
+    res.status(500).json({ message: 'AI summary failed: ' + err.message })
+  }
+})
+
 module.exports = router
