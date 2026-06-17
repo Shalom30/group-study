@@ -567,7 +567,7 @@ mediaRecorder.onstop = () => {
     setSubmitted(true) // show loading state immediately
     try {
       const token = localStorage.getItem('token')
-      const res = await fetch(`http://localhost:5000/api/sessions/${id}/ai-evaluate`, {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/sessions/${id}/ai-evaluate`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1574,7 +1574,7 @@ function AiSummaryCard({ sessionId, generalMessages }) {
         .filter(m => m.type === 'user')
         .map(m => ({ sender: m.sender, text: m.text }))
 
-      const res = await fetch(`http://localhost:5000/api/sessions/${sessionId}/ai-summary`, {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/sessions/${sessionId}/ai-summary`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

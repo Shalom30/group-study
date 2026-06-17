@@ -21,7 +21,7 @@ export default function Documents() {
 
   const fetchSavedDocs = async () => {
     try {
-      const res = await fetch('http://localhost:5000/api/sessions/ai/documents', {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/sessions/ai/documents`, {
         headers: { 'Authorization': `Bearer ${token}` }
       })
       const data = await res.json()
@@ -47,7 +47,7 @@ export default function Documents() {
     try {
       const formData = new FormData()
       formData.append('file', file)
-      const res = await fetch('http://localhost:5000/api/sessions/ai/document', {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/sessions/ai/document`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` },
         body: formData,
