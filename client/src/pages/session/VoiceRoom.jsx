@@ -92,13 +92,13 @@ function RoomControls({ onLeave, onToggleChat, showChat }) {
   )
 }
 
-export default function VoiceRoom({ sessionId, onLeave, onToggleChat, showChat }) {
+export default function VoiceRoom({ sessionId, roomId, onLeave, onToggleChat, showChat }) {
   const [token, setToken] = useState(null)
   const [url, setUrl] = useState(null)
   const [error, setError] = useState(null)
 
   useEffect(() => {
-    api.get(`/sessions/${sessionId}/livekit-token`)
+    api.get(`/sessions/${sessionId}/livekit-token?roomId=${roomId || sessionId}`)
       .then(res => {
         setToken(res.data.token)
         setUrl(res.data.url)

@@ -71,6 +71,7 @@ export default function SessionRoom() {
   const [showVoiceRoom, setShowVoiceRoom] = useState(false)
   const [showChatOverlay, setShowChatOverlay] = useState(false)
   const [dmUnread, setDmUnread] = useState(0)
+  const receivedVoiceIdsRef = useRef(new Set())
 
   useEffect(() => {
     const token = localStorage.getItem('token')
@@ -111,7 +112,12 @@ export default function SessionRoom() {
 
   // Connect socket after userName is known
   useEffect(() => {
-    if (!userName || !session?._id) return
+    if (!userName || !session?._id || mySubGroupIndex === null) return
+
+    if (socketRef.current) {
+      socketRef.current.disconnect()
+      socketRef.current = null
+    }
 
     const socket = io(SOCKET_URL)
     socketRef.current = socket
@@ -190,19 +196,31 @@ export default function SessionRoom() {
       addGeneralSystemMessage(`${who} is ready to end the session ✅`)
     })
 
-    socket.on('receive-voice-note', ({ audioData, sender, time }) => {
+    const receivedVoiceIds = new Set()
+    socket.on('receive-voice-note', ({ audioData, sender, time, noteId }) => {
+      if (sender === userName) return
       const voiceMessage = {
-        id: Date.now() + Math.random(),
+        id: noteId || `${sender}-${time}`,
         type: 'voice',
         audioData,
         sender,
         time
       }
-      if (currentPhase === 1) {
-        setSubgroupMessages(prev => [...prev, voiceMessage])
-      } else {
-        setGeneralMessages(prev => [...prev, voiceMessage])
-      }
+      setSession(currentSession => {
+        const phase = currentSession?.currentPhase ?? 0
+        if (phase === 1) {
+          setSubgroupMessages(prev => {
+            if (prev.some(m => m.id === voiceMessage.id)) return prev
+            return [...prev, voiceMessage]
+          })
+        } else {
+          setGeneralMessages(prev => {
+            if (prev.some(m => m.id === voiceMessage.id)) return prev
+            return [...prev, voiceMessage]
+          })
+        }
+        return currentSession
+      })
     })
 
     socket.on('dm-received', ({ from, message, time }) => {
@@ -495,18 +513,35 @@ export default function SessionRoom() {
     mediaRecorder.ondataavailable = (e) => {
       if (e.data.size > 0) audioChunksRef.current.push(e.data)
     }
-
-    mediaRecorder.onstop = () => {
+mediaRecorder.onstop = () => {
       const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
       const reader = new FileReader()
       reader.onloadend = () => {
         const audioData = reader.result
+        const isPrivate = (session?.currentPhase || 0) === 1
+        const noteId = `${userName}-${Date.now()}`
         socketRef.current?.emit('send-voice-note', {
           groupId: id,
           audioData,
           sender: userName,
-          time: new Date().toLocaleTimeString()
+          time: new Date().toLocaleTimeString(),
+          isPrivate,
+          subGroupIndex: mySubGroupIndex,
+          noteId
         })
+        // Add own message locally — server won't echo back to sender
+        const voiceMessage = {
+          id: Date.now() + Math.random(),
+          type: 'voice',
+          audioData,
+          sender: userName,
+          time: new Date().toLocaleTimeString()
+        }
+        if (isPrivate) {
+          setSubgroupMessages(prev => [...prev, voiceMessage])
+        } else {
+          setGeneralMessages(prev => [...prev, voiceMessage])
+        }
       }
       reader.readAsDataURL(blob)
       stream.getTracks().forEach(t => t.stop())
@@ -528,35 +563,58 @@ export default function SessionRoom() {
     addGeneralSystemMessage(newState ? 'You raised your hand ✋' : 'You lowered your hand')
   }
 
-  const submitAnswers = () => {
-    const total = session.flashcards?.length || 1
-    let correct = 0
-    const wrong = []
-    session.flashcards?.forEach((card, i) => {
-      if (answers[i]?.trim().length > 3) {
-        correct++
-      } else {
-        wrong.push({ question: card.question, answer: card.answer, index: i })
-      }
-    })
-    setScore(Math.round((correct / total) * 100))
-    setWrongAnswers(wrong)
-    // Save score to backend for admin report
-    const finalScore = Math.round((correct / total) * 100)
-    api.post(`/sessions/${id}/score`, {
-      score: finalScore,
-      wrongCount: wrong.length,
-      totalCount: total
-    }).catch(err => console.error('Score save failed:', err))
+  const submitAnswers = async () => {
+    setSubmitted(true) // show loading state immediately
+    try {
+      const token = localStorage.getItem('token')
+      const res = await fetch(`http://localhost:5000/api/sessions/${id}/ai-evaluate`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          answers,
+          flashcards: session.flashcards
+        })
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.message)
 
-    setSubmitted(true)
-    socketRef.current?.emit('score-submitted', {
-      groupId: id,
-      userName,
-      score: Math.round((correct / total) * 100)
-    })
+      const finalScore = data.score
+      const wrong = session.flashcards
+        ?.map((card, i) => ({ ...card, index: i, correct: data.results[i]?.correct, feedback: data.results[i]?.feedback }))
+        .filter(c => !c.correct) || []
+
+      setScore(finalScore)
+      setWrongAnswers(wrong)
+
+      await api.post(`/sessions/${id}/score`, {
+        score: finalScore,
+        wrongCount: wrong.length,
+        totalCount: session.flashcards?.length
+      })
+
+      socketRef.current?.emit('score-submitted', {
+        groupId: id,
+        userName,
+        score: finalScore
+      })
+    } catch (err) {
+      console.error('Evaluation failed:', err)
+      // Fallback: basic length check
+      const total = session.flashcards?.length || 1
+      let correct = 0
+      const wrong = []
+      session.flashcards?.forEach((card, i) => {
+        if (answers[i]?.trim().length > 10) { correct++ }
+        else { wrong.push({ ...card, index: i }) }
+      })
+      const finalScore = Math.round((correct / total) * 100)
+      setScore(finalScore)
+      setWrongAnswers(wrong)
+    }
   }
-
   // ── Which messages to show ──
   const currentPhase = session?.currentPhase || 0
   const activeMessages = currentPhase === 1 ? subgroupMessages : generalMessages
@@ -975,7 +1033,6 @@ export default function SessionRoom() {
               <div className="border-t border-border p-3 md:p-4">
                 {mySubGroupIndex === presentingSubgroupIndex || allDebriefDone ? (
                   <div className="flex items-center gap-2 bg-secondary rounded-xl px-3 md:px-4 py-2.5 md:py-2">
-                    {/* <Mic className="w-4 h-4 text-purple-500 flex-shrink-0" /> */}
                     <input
                       className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
                       placeholder="Share your subgroup's findings..."
@@ -983,6 +1040,15 @@ export default function SessionRoom() {
                       onChange={(e) => setInput(e.target.value)}
                       onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
                     />
+                    <button
+                      onMouseDown={startRecording}
+                      onMouseUp={stopRecording}
+                      onTouchStart={startRecording}
+                      onTouchEnd={stopRecording}
+                      className={`p-2 rounded-lg flex-shrink-0 transition-colors ${isRecording ? 'bg-red-500 text-white animate-pulse' : 'text-muted-foreground hover:text-foreground'}`}
+                    >
+                      <Mic className="w-4 h-4" />
+                    </button>
                     <Button size="sm" onClick={sendMessage} disabled={!input.trim()}>
                       <Send className="w-4 h-4" />
                     </Button>
@@ -1028,6 +1094,11 @@ export default function SessionRoom() {
                               <p className="text-xs text-muted-foreground bg-secondary rounded px-2 py-1">
                                 💡 Model answer: {w.answer}
                               </p>
+                              {w.feedback && (
+                                <p className="text-xs text-orange-600 mt-1 px-2">
+                                  🤖 {w.feedback}
+                                </p>
+                              )}
                             </CardContent>
                           </Card>
                         ))}
@@ -1425,6 +1496,9 @@ export default function SessionRoom() {
             <div className="flex-1 min-h-0">
               <VoiceRoom
                 sessionId={id}
+                roomId={currentPhase === 1 && mySubGroupIndex !== null
+                  ? `${id}-subgroup-${mySubGroupIndex}`
+                  : id}
                 onLeave={() => setShowVoiceRoom(false)}
                 onToggleChat={() => setShowChatOverlay(c => !c)}
                 showChat={showChatOverlay}

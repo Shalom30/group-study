@@ -135,8 +135,12 @@ io.on('connection', (socket) => {
     io.to(groupId).emit('dm-received', { from, message, time: new Date().toLocaleTimeString() })
   })
 
-  socket.on('send-voice-note', ({ groupId, audioData, sender, time }) => {
-    io.to(groupId).emit('receive-voice-note', { audioData, sender, time })
+  socket.on('send-voice-note', ({ groupId, audioData, sender, time, subGroupIndex, isPrivate, noteId }) => {
+    if (isPrivate && subGroupIndex !== undefined && subGroupIndex !== null) {
+      socket.to(`${groupId}_sub_${subGroupIndex}`).emit('receive-voice-note', { audioData, sender, time, noteId })
+    } else {
+      socket.to(groupId).emit('receive-voice-note', { audioData, sender, time, noteId })
+    }
   })
   
   socket.on('score-submitted', ({ groupId, userName, score }) => {
