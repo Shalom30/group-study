@@ -34,6 +34,10 @@ app.get('/', (req, res) => {
   res.send('NoteLearn API Running')
 })
 
+app.get('/debug-env', (req, res) => {
+  res.json({ CLIENT_URL: process.env.CLIENT_URL })
+})
+
 app.use('/api/auth', authRoutes)
 app.use('/api/protected', protectedRoutes)
 app.use('/api/groups', groupRoutes)
@@ -173,6 +177,3 @@ server.listen(PORT, () => {
   console.log('Server running on port', PORT)
 })
 
-app.get('/debug-env', (req, res) => {
-  res.json({ CLIENT_URL: process.env.CLIENT_URL })
-})
