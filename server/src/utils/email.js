@@ -1,5 +1,5 @@
-const { Resend } = require('resend')
-const resend = new Resend(process.env.RESEND_API_KEY)
+const sgMail = require('@sendgrid/mail')
+sgMail.setApiKey(process.env.SENDGRID_API_KEY)
 
 const sendInvitationEmail = async ({ toEmail, groupName, invitedByName, inviteId }) => {
   const inviteLink = `${process.env.FRONTEND_URL}/invite/${inviteId}`
@@ -13,9 +13,6 @@ const sendInvitationEmail = async ({ toEmail, groupName, invitedByName, inviteId
     <body style="margin:0;padding:0;background-color:#f5f0eb;font-family:'Segoe UI',Arial,sans-serif;">
       <div style="max-width:560px;margin:40px auto;padding:20px;">
         <div style="background:linear-gradient(135deg,#e07b2a,#c45e1a);border-radius:16px 16px 0 0;padding:32px;text-align:center;">
-          <div style="width:48px;height:48px;background:rgba(255,255,255,0.2);border-radius:12px;margin:0 auto 12px;display:flex;align-items:center;justify-content:center;">
-            <span style="font-size:24px;">🎓</span>
-          </div>
           <h1 style="color:white;margin:0;font-size:24px;font-weight:700;">NoteLearn</h1>
           <p style="color:rgba(255,255,255,0.85);margin:4px 0 0;font-size:13px;">AI-Powered Collaborative Study</p>
         </div>
@@ -47,8 +44,8 @@ const sendInvitationEmail = async ({ toEmail, groupName, invitedByName, inviteId
     </html>
   `
 
-  await resend.emails.send({
-    from: 'NoteLearn <onboarding@resend.dev>',
+  await sgMail.send({
+    from: 'team.notelearn@gmail.com',
     to: toEmail,
     subject: `${invitedByName} invited you to join "${groupName}" on NoteLearn`,
     html
