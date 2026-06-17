@@ -12,7 +12,7 @@ import {
 import { Card, CardContent } from '@/components/ui/card'
 import VoiceRoom from '../session/VoiceRoom'
 
-const SOCKET_URL = 'http://localhost:5000'
+const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000'
 
 const PHASE_INFO = [
   { id: 'briefing', label: 'Briefing', icon: BookOpen, color: 'text-blue-500', bg: 'bg-blue-50', border: 'border-blue-200', duration: 10, description: 'Introduction and topic overview' },
